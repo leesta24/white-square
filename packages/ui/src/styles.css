@@ -1,0 +1,106 @@
+:root {
+  --pixel: "Press Start 2P", monospace;
+  --bg: #1a1c2c;
+  --panel: #2b2f4a;
+  --ink: #f4f4f4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  image-rendering: pixelated;
+}
+
+.pixel { font-family: var(--pixel); }
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 16px; background: #11121f; border-bottom: 4px solid #000;
+}
+.topbar h1 { font-family: var(--pixel); font-size: 14px; margin: 0; }
+.topbar .tabs { display: flex; gap: 8px; }
+.topbar .mode { margin-left: auto; font-family: var(--pixel); font-size: 9px; }
+.mode.echo { color: #f7d51d; }
+.mode.pi { color: #92cc41; }
+
+.tab-btn {
+  font-family: var(--pixel); font-size: 10px; cursor: pointer;
+  padding: 8px 12px; background: var(--panel); color: var(--ink);
+  border: 3px solid #000; border-radius: 0;
+}
+.tab-btn.active { background: #209cee; }
+
+.body { flex: 1; min-height: 0; display: flex; }
+
+.col { padding: 14px; overflow-y: auto; }
+.col.left { width: 240px; border-right: 4px solid #000; }
+.col.center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.col.right { width: 220px; border-left: 4px solid #000; }
+
+.list-item {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 8px; margin-bottom: 6px; background: var(--panel);
+  border: 3px solid #000;
+}
+.list-item.active { background: #3a7bd5; }
+.list-item .emoji { font-size: 22px; line-height: 1; }
+.list-item .meta { min-width: 0; }
+.list-item .name { font-size: 13px; }
+.list-item .sub { font-size: 10px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+label.field { display: block; margin: 10px 0 4px; font-family: var(--pixel); font-size: 9px; }
+input.nes-input, textarea.nes-textarea { background: #11121f; color: var(--ink); }
+
+.chat-scroll { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 10px; }
+.bubble { max-width: 78%; padding: 10px 12px; border: 3px solid #000; white-space: pre-wrap; word-break: break-word; }
+.bubble.user { align-self: flex-end; background: #209cee; }
+.bubble.agent { align-self: flex-start; background: var(--panel); }
+.bubble.system { align-self: center; background: #5a4b81; font-size: 12px; opacity: .9; }
+.bubble .who { font-family: var(--pixel); font-size: 9px; opacity: .85; margin-bottom: 6px; }
+.bubble .tool { font-size: 10px; opacity: .6; margin-top: 6px; }
+
+.composer { display: flex; gap: 8px; padding: 10px; border-top: 4px solid #000; }
+.composer input { flex: 1; }
+.mention-wrap { position: relative; flex: 1; display: flex; }
+.mention-pop {
+  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
+  background: #11121f; border: 3px solid #000; max-height: 180px; overflow-y: auto; z-index: 20;
+}
+.mention-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px;
+}
+.mention-item .emoji { font-size: 18px; line-height: 1; }
+.mention-item.active, .mention-item:hover { background: #209cee; }
+.mention-hint { font-size: 9px; opacity: .5; padding: 4px 10px; font-family: var(--pixel); }
+
+.char-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.char-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px; background: #11121f; border: 3px solid #000; cursor: pointer;
+  color: var(--ink); font-size: 11px;
+}
+.char-cell.active { background: #209cee; }
+
+.plaza { flex: 1; position: relative; overflow: hidden; }
+.plaza-canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
+.plaza-bar {
+  position: absolute; top: 12px; left: 14px; right: 14px;
+  display: flex; align-items: center; justify-content: space-between; pointer-events: none;
+}
+.plaza-bar button { pointer-events: auto; }
+.plaza-hint {
+  position: absolute; bottom: 10px; left: 0; right: 0; text-align: center;
+  font-size: 10px; opacity: .4; pointer-events: none;
+}
+
+.muted { opacity: .6; font-size: 12px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.blink::after { content: "▌"; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }

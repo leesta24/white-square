@@ -1,0 +1,23 @@
+{
+  "name": "white-square",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/runtime",
+    "packages/host",
+    "packages/ui"
+  ],
+  "scripts": {
+    "dev": "concurrently -n host,ui -c blue,magenta \"npm:dev:host\" \"npm:dev:ui\"",
+    "dev:host": "npm -w @white-square/host run dev",
+    "dev:ui": "npm -w @white-square/ui run dev",
+    "build:ui": "npm -w @white-square/ui run build",
+    "smoke": "node packages/runtime/test/smoke.ts"
+  },
+  "devDependencies": {
+    "concurrently": "9.1.0"
+  }
+}
