@@ -3,22 +3,49 @@ import type { Snapshot } from "./api.ts";
 import { CHARACTERS, charForm } from "./characters.ts";
 
 interface Sprite {
-  id: string; name: string; sprite?: string;
-  x: number; y: number; tx: number; ty: number;
-  phase: number; pause: number; facing: number;
+  id: string;
+  name: string;
+  sprite?: string;
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  phase: number;
+  pause: number;
+  facing: number;
+  phrase: string;
+  phraseUntil: number;
+  nextPhraseIn: number;
 }
 
 const CHAR = "/assets/tiny-dungeon/tilemap_packed.png";
 const T = 16;
 const SHEET_COLS = 12;
 const TS = 32; // on-screen tile size
+const MIN_AGENT_DISTANCE = 46;
+const TALK_DISTANCE = 82;
 
 interface Scene {
-  cols: number; rows: number;
-  props: { c: number; r: number; kind: "crate" | "barrel" | "container" | "fence" | "bench" | "plane" | "table" }[];
-  buildings: { c: number; r: number; w: number; h: number; tone: "blue" | "brown" | "gray" }[];
+  cols: number;
+  rows: number;
+  props: {
+    c: number;
+    r: number;
+    kind:
+      "crate" | "barrel" | "container" | "fence" | "bench" | "plane" | "table";
+  }[];
+  buildings: {
+    c: number;
+    r: number;
+    w: number;
+    h: number;
+    tone: "blue" | "brown" | "gray";
+  }[];
   // plaza ellipse in normalized canvas coords (where agents roam)
-  pcx: number; pcy: number; prx: number; pry: number;
+  pcx: number;
+  pcy: number;
+  prx: number;
+  pry: number;
 }
 
 function rnd(s: { v: number }) {
@@ -29,8 +56,8 @@ function rnd(s: { v: number }) {
 function buildScene(cols: number, rows: number): Scene {
   const cx = Math.floor(cols / 2);
   const cy = Math.floor(rows * 0.55);
-  const rx = Math.min(Math.floor(cols * 0.3), 14);
-  const ry = Math.min(Math.floor(rows * 0.25), 8);
+  const rx = Math.min(Math.floor(cols * 0.42), 24);
+  const ry = Math.min(Math.floor(rows * 0.34), 13);
 
   const props: Scene["props"] = [];
   const add = (c: number, r: number, kind: Scene["props"][number]["kind"]) => {
@@ -48,19 +75,45 @@ function buildScene(cols: number, rows: number): Scene {
   add(cx + 3, cy + 6, "bench");
 
   const buildings = [
-    { c: Math.max(1, cx - 17), r: Math.max(1, cy - 12), w: 5, h: 3, tone: "blue" as const },
-    { c: Math.min(cols - 7, cx + 12), r: Math.max(1, cy - 11), w: 5, h: 3, tone: "brown" as const },
-    { c: Math.max(1, cx - 4), r: Math.min(rows - 5, cy + 10), w: 7, h: 3, tone: "gray" as const },
+    {
+      c: Math.max(1, cx - 17),
+      r: Math.max(1, cy - 12),
+      w: 5,
+      h: 3,
+      tone: "blue" as const,
+    },
+    {
+      c: Math.min(cols - 7, cx + 12),
+      r: Math.max(1, cy - 11),
+      w: 5,
+      h: 3,
+      tone: "brown" as const,
+    },
+    {
+      c: Math.max(1, cx - 4),
+      r: Math.min(rows - 5, cy + 10),
+      w: 7,
+      h: 3,
+      tone: "gray" as const,
+    },
   ];
 
   return {
-    cols, rows, props, buildings,
-    pcx: cx / cols, pcy: cy / rows, prx: (rx - 3) / cols, pry: (ry - 3) / rows,
+    cols,
+    rows,
+    props,
+    buildings,
+    pcx: cx / cols,
+    pcy: cy / rows,
+    prx: Math.max(0.16, (rx - 1) / cols),
+    pry: Math.max(0.14, (ry - 1) / rows),
   };
 }
 
 export function PlazaView({
-  snapshots, onSelect, onNew,
+  snapshots,
+  onSelect,
+  onNew,
 }: {
   snapshots: Snapshot[];
   onSelect: (s: Snapshot) => void;
@@ -79,12 +132,24 @@ export function PlazaView({
     for (const id of [...m.keys()]) if (!ids.has(id)) m.delete(id);
     snapshots.forEach((s) => {
       const ex = m.get(s.id);
-      if (ex) { ex.name = s.name; ex.sprite = s.sprite; }
-      else
+      if (ex) {
+        ex.name = s.name;
+        ex.sprite = s.sprite;
+      } else
         m.set(s.id, {
-          id: s.id, name: s.name, sprite: s.sprite,
-          x: 0.4 + rnd(seed.current) * 0.2, y: 0.55 + rnd(seed.current) * 0.12,
-          tx: 0.5, ty: 0.6, phase: rnd(seed.current) * 6.28, pause: rnd(seed.current) * 1500, facing: 1,
+          id: s.id,
+          name: s.name,
+          sprite: s.sprite,
+          x: 0.24 + rnd(seed.current) * 0.52,
+          y: 0.34 + rnd(seed.current) * 0.38,
+          tx: 0.24 + rnd(seed.current) * 0.52,
+          ty: 0.34 + rnd(seed.current) * 0.38,
+          phase: rnd(seed.current) * 6.28,
+          pause: rnd(seed.current) * 1500,
+          facing: 1,
+          phrase: "",
+          phraseUntil: 0,
+          nextPhraseIn: 1000 + rnd(seed.current) * 3000,
         });
     });
   }, [snapshots]);
@@ -107,15 +172,18 @@ export function PlazaView({
 
     let raf = 0;
     let lastT = performance.now();
-    let cssW = 0, cssH = 0;
+    let cssW = 0,
+      cssH = 0;
     const TOP = 0;
     const BOT = 0;
 
     const resize = () => {
       const r = canvas.getBoundingClientRect();
-      cssW = r.width; cssH = r.height;
+      cssW = r.width;
+      cssH = r.height;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(cssW * dpr); canvas.height = Math.floor(cssH * dpr);
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.imageSmoothingEnabled = false;
       const cols = Math.ceil(cssW / TS) + 1;
@@ -125,7 +193,8 @@ export function PlazaView({
     resize();
     window.addEventListener("resize", resize);
 
-    const tileHash = (c: number, r: number) => ((c * 73856093) ^ (r * 19349663)) >>> 0;
+    const tileHash = (c: number, r: number) =>
+      ((c * 73856093) ^ (r * 19349663)) >>> 0;
 
     const terrainAt = (c: number, r: number, sc: Scene) => {
       const nx = c / Math.max(1, sc.cols - 1);
@@ -134,12 +203,14 @@ export function PlazaView({
       if (coast > 1.1) return "water";
       if (coast > 0.98) return "sand";
       if (nx > 0.22 && nx < 0.78 && ny > 0.29 && ny < 0.76) return "concrete";
-      if (((nx - 0.45) / 0.24) ** 2 + ((ny - 0.52) / 0.18) ** 2 < 1) return "concrete";
+      if (((nx - 0.45) / 0.24) ** 2 + ((ny - 0.52) / 0.18) ** 2 < 1)
+        return "concrete";
       return "grass";
     };
 
     const drawGroundTile = (c: number, r: number, sc: Scene) => {
-      const x = c * TS, y = r * TS;
+      const x = c * TS,
+        y = r * TS;
       const h = tileHash(c, r);
       const terrain = terrainAt(c, r, sc);
       if (terrain === "water") {
@@ -177,18 +248,27 @@ export function PlazaView({
     };
 
     const drawProp = (p: Scene["props"][number]) => {
-      const x = p.c * TS, y = p.r * TS;
+      const x = p.c * TS,
+        y = p.r * TS;
       if (p.kind === "crate") {
-        ctx.fillStyle = "#4a2f21"; ctx.fillRect(x + 4, y + 8, 23, 18);
-        ctx.fillStyle = "#9d6a3e"; ctx.fillRect(x + 7, y + 11, 17, 12);
-        ctx.fillStyle = "#2b1e17"; ctx.fillRect(x + 7, y + 16, 17, 3);
+        ctx.fillStyle = "#4a2f21";
+        ctx.fillRect(x + 4, y + 8, 23, 18);
+        ctx.fillStyle = "#9d6a3e";
+        ctx.fillRect(x + 7, y + 11, 17, 12);
+        ctx.fillStyle = "#2b1e17";
+        ctx.fillRect(x + 7, y + 16, 17, 3);
       } else if (p.kind === "barrel") {
-        ctx.fillStyle = "#29313a"; ctx.fillRect(x + 10, y + 6, 13, 22);
-        ctx.fillStyle = "#c07a33"; ctx.fillRect(x + 12, y + 8, 9, 18);
-        ctx.fillStyle = "#1c2229"; ctx.fillRect(x + 10, y + 13, 13, 3);
+        ctx.fillStyle = "#29313a";
+        ctx.fillRect(x + 10, y + 6, 13, 22);
+        ctx.fillStyle = "#c07a33";
+        ctx.fillRect(x + 12, y + 8, 9, 18);
+        ctx.fillStyle = "#1c2229";
+        ctx.fillRect(x + 10, y + 13, 13, 3);
       } else if (p.kind === "container") {
-        ctx.fillStyle = "#1f2930"; ctx.fillRect(x - 9, y + 8, 48, 18);
-        ctx.fillStyle = "#b55643"; ctx.fillRect(x - 6, y + 10, 42, 14);
+        ctx.fillStyle = "#1f2930";
+        ctx.fillRect(x - 9, y + 8, 48, 18);
+        ctx.fillStyle = "#b55643";
+        ctx.fillRect(x - 6, y + 10, 42, 14);
         ctx.fillStyle = "#5d2f2e";
         for (let i = 0; i < 5; i++) ctx.fillRect(x - 2 + i * 8, y + 11, 2, 12);
       } else if (p.kind === "fence") {
@@ -218,22 +298,35 @@ export function PlazaView({
         ctx.fillRect(-5, -27, 12, 8);
         ctx.restore();
       } else if (p.kind === "table") {
-        ctx.fillStyle = "#24282d"; ctx.fillRect(x - 8, y + 13, 48, 5);
-        ctx.fillStyle = "#8b7b62"; ctx.fillRect(x - 6, y + 9, 44, 4);
-        ctx.fillStyle = "#1b1f24"; ctx.fillRect(x + 3, y + 4, 22, 4);
+        ctx.fillStyle = "#24282d";
+        ctx.fillRect(x - 8, y + 13, 48, 5);
+        ctx.fillStyle = "#8b7b62";
+        ctx.fillRect(x - 6, y + 9, 44, 4);
+        ctx.fillStyle = "#1b1f24";
+        ctx.fillRect(x + 3, y + 4, 22, 4);
         ctx.fillRect(x - 4, y + 19, 4, 8);
         ctx.fillRect(x + 31, y + 19, 4, 8);
       } else {
-        ctx.fillStyle = "#24282d"; ctx.fillRect(x + 4, y + 13, 24, 5);
-        ctx.fillStyle = "#7d6b55"; ctx.fillRect(x + 5, y + 9, 22, 4);
+        ctx.fillStyle = "#24282d";
+        ctx.fillRect(x + 4, y + 13, 24, 5);
+        ctx.fillStyle = "#7d6b55";
+        ctx.fillRect(x + 5, y + 9, 22, 4);
         ctx.fillRect(x + 7, y + 19, 4, 8);
         ctx.fillRect(x + 21, y + 19, 4, 8);
       }
     };
 
     const drawBuilding = (b: Scene["buildings"][number]) => {
-      const x = b.c * TS, y = b.r * TS, w = b.w * TS, h = b.h * TS;
-      const body = b.tone === "brown" ? "#7b5748" : b.tone === "blue" ? "#657383" : "#6e7472";
+      const x = b.c * TS,
+        y = b.r * TS,
+        w = b.w * TS,
+        h = b.h * TS;
+      const body =
+        b.tone === "brown"
+          ? "#7b5748"
+          : b.tone === "blue"
+            ? "#657383"
+            : "#6e7472";
       const roof = b.tone === "brown" ? "#3b3130" : "#29313a";
       ctx.fillStyle = "rgba(0,0,0,0.2)";
       ctx.fillRect(x - 5, y + 5, w + 10, h + 10);
@@ -242,7 +335,8 @@ export function PlazaView({
       ctx.fillStyle = roof;
       ctx.fillRect(x - 4, y - 6, w + 8, 13);
       ctx.fillStyle = "rgba(219,230,235,0.72)";
-      for (let xx = x + 12; xx < x + w - 8; xx += 24) ctx.fillRect(xx, y + 20, 12, 7);
+      for (let xx = x + 12; xx < x + w - 8; xx += 24)
+        ctx.fillRect(xx, y + 20, 12, 7);
       ctx.fillStyle = "#171b20";
       ctx.fillRect(x + w / 2 - 13, y + h - 28, 26, 28);
       ctx.fillStyle = "rgba(255,255,255,0.06)";
@@ -253,10 +347,13 @@ export function PlazaView({
     const fieldY = (y: number) => TOP + y * (cssH - TOP - BOT);
 
     const drawChar = (s: Sprite, t: number) => {
-      const px = fieldX(s.x), py = fieldY(s.y);
+      const px = fieldX(s.x),
+        py = fieldY(s.y);
       const size = 40;
       const moving = s.pause <= 0 && Math.hypot(s.tx - s.x, s.ty - s.y) > 0.02;
-      const bob = moving ? Math.abs(Math.sin(t * 0.009 + s.phase)) * 5 : Math.sin(t * 0.0025 + s.phase) * 1.2;
+      const bob = moving
+        ? Math.abs(Math.sin(t * 0.009 + s.phase)) * 5
+        : Math.sin(t * 0.0025 + s.phase) * 1.2;
       ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.beginPath();
       ctx.ellipse(px, py, 13, 5, 0, 0, Math.PI * 2);
@@ -270,7 +367,17 @@ export function PlazaView({
         if (img?.complete) ctx.drawImage(img, -size / 2, -size, size, size);
       } else {
         const tile = form.tile ?? 85;
-        ctx.drawImage(char, (tile % SHEET_COLS) * T, Math.floor(tile / SHEET_COLS) * T, T, T, -size / 2, -size, size, size);
+        ctx.drawImage(
+          char,
+          (tile % SHEET_COLS) * T,
+          Math.floor(tile / SHEET_COLS) * T,
+          T,
+          T,
+          -size / 2,
+          -size,
+          size,
+          size,
+        );
       }
       ctx.restore();
       ctx.font = "11px -apple-system, sans-serif";
@@ -283,23 +390,144 @@ export function PlazaView({
       ctx.fillText(s.name, px, py + 15);
     };
 
-    const update = (dt: number, sc: Scene) => {
-      for (const s of sprites.current.values()) {
-        if (s.pause > 0) { s.pause -= dt; continue; }
-        const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
-        if (d < 0.02) {
-          // retarget within the plaza ellipse
-          const a = rnd(seed.current) * Math.PI * 2;
-          const rr = Math.sqrt(rnd(seed.current));
-          s.tx = sc.pcx + Math.cos(a) * sc.prx * rr;
-          s.ty = sc.pcy + Math.sin(a) * sc.pry * rr;
-          s.pause = 400 + rnd(seed.current) * 2400;
+    const drawSpeech = (x: number, y: number, text: string) => {
+      ctx.font = "12px -apple-system, PingFang SC, Microsoft YaHei, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const maxW = Math.min(180, Math.max(70, cssW * 0.26));
+      const words = [...text];
+      const lines: string[] = [];
+      let line = "";
+      for (const ch of words) {
+        const next = line + ch;
+        if (ctx.measureText(next).width > maxW - 18 && line) {
+          lines.push(line);
+          line = ch;
         } else {
-          const sp = 0.00006 * dt;
-          s.x += (dx / d) * sp; s.y += (dy / d) * sp;
-          if (Math.abs(dx) > 0.0001) s.facing = dx >= 0 ? 1 : -1;
+          line = next;
         }
       }
+      if (line) lines.push(line);
+      const visible = lines.slice(0, 2);
+      if (lines.length > 2)
+        visible[1] = `${visible[1].slice(0, Math.max(1, visible[1].length - 1))}…`;
+      const w = Math.min(
+        maxW,
+        Math.max(...visible.map((l) => ctx.measureText(l).width), 30) + 18,
+      );
+      const h = 16 + visible.length * 16;
+      const bx = Math.max(8, Math.min(cssW - w - 8, x - w / 2));
+      const by = Math.max(8, y - h);
+      ctx.fillStyle = "rgba(17,18,31,0.94)";
+      ctx.fillRect(bx, by, w, h);
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(bx, by, w, h);
+      ctx.fillStyle = "#f4f4f4";
+      visible.forEach((lineText, i) =>
+        ctx.fillText(lineText, bx + w / 2, by + 15 + i * 16),
+      );
+      ctx.fillStyle = "rgba(17,18,31,0.94)";
+      ctx.beginPath();
+      ctx.moveTo(x - 5, by + h - 1);
+      ctx.lineTo(x + 5, by + h - 1);
+      ctx.lineTo(x, by + h + 8);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    const clampToPlaza = (s: Sprite, sc: Scene) => {
+      const nx = (s.x - sc.pcx) / sc.prx;
+      const ny = (s.y - sc.pcy) / sc.pry;
+      const d = Math.hypot(nx, ny);
+      if (d <= 1) return;
+      s.x = sc.pcx + (nx / d) * sc.prx;
+      s.y = sc.pcy + (ny / d) * sc.pry;
+    };
+
+    const retarget = (s: Sprite, sc: Scene) => {
+      const a = rnd(seed.current) * Math.PI * 2;
+      const rr = Math.sqrt(rnd(seed.current));
+      s.tx = sc.pcx + Math.cos(a) * sc.prx * rr;
+      s.ty = sc.pcy + Math.sin(a) * sc.pry * rr;
+    };
+
+    const triggerNearbyPhrase = (
+      s: Sprite,
+      t: number,
+      dt: number,
+      all: Sprite[],
+    ) => {
+      const snap = snapById.current.get(s.id);
+      const phrases = (snap?.catchphrases ?? [])
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (phrases.length === 0) {
+        s.phrase = "";
+        s.phraseUntil = 0;
+        s.nextPhraseIn = 1200;
+        return;
+      }
+      s.nextPhraseIn -= dt;
+      if (t < s.phraseUntil || s.nextPhraseIn > 0) return;
+      const hasNeighbor = all.some((other) => {
+        if (other.id === s.id) return false;
+        return (
+          Math.hypot((other.x - s.x) * cssW, (other.y - s.y) * cssH) <=
+          TALK_DISTANCE
+        );
+      });
+      if (!hasNeighbor) return;
+      s.phrase = phrases[Math.floor(rnd(seed.current) * phrases.length)] ?? "";
+      s.phraseUntil = t + 2400 + rnd(seed.current) * 800;
+      s.nextPhraseIn = 5200 + rnd(seed.current) * 8500;
+    };
+
+    const separateAgents = (all: Sprite[], sc: Scene) => {
+      for (let i = 0; i < all.length; i++) {
+        for (let j = i + 1; j < all.length; j++) {
+          const a = all[i],
+            b = all[j];
+          const dxPx = (b.x - a.x) * cssW;
+          const dyPx = (b.y - a.y) * cssH;
+          const dist = Math.max(0.001, Math.hypot(dxPx, dyPx));
+          if (dist >= MIN_AGENT_DISTANCE) continue;
+          const push = (MIN_AGENT_DISTANCE - dist) * 0.55;
+          const ux = dxPx / dist;
+          const uy = dyPx / dist;
+          a.x -= (ux * push) / cssW;
+          a.y -= (uy * push) / cssH;
+          b.x += (ux * push) / cssW;
+          b.y += (uy * push) / cssH;
+          clampToPlaza(a, sc);
+          clampToPlaza(b, sc);
+        }
+      }
+    };
+
+    const update = (dt: number, t: number, sc: Scene) => {
+      const all = [...sprites.current.values()];
+      for (const s of all) {
+        if (s.pause > 0) {
+          s.pause -= dt;
+        } else {
+          const dx = s.tx - s.x,
+            dy = s.ty - s.y,
+            d = Math.hypot(dx, dy);
+          if (d < 0.02) {
+            retarget(s, sc);
+            s.pause = 250 + rnd(seed.current) * 1200;
+          } else {
+            const sp = 0.000075 * dt;
+            s.x += (dx / d) * sp;
+            s.y += (dy / d) * sp;
+            if (Math.abs(dx) > 0.0001) s.facing = dx >= 0 ? 1 : -1;
+            clampToPlaza(s, sc);
+          }
+        }
+        triggerNearbyPhrase(s, t, dt, all);
+      }
+      separateAgents(all, sc);
     };
 
     const loop = (t: number) => {
@@ -307,26 +535,42 @@ export function PlazaView({
       lastT = t;
       const sc = sceneRef.current;
       if (loaded >= 1 && sc) {
-        update(dt, sc);
+        update(dt, t, sc);
         // Ground: coastal grass/water around a concrete waiting square.
         for (let r = 0; r < sc.rows; r++)
           for (let c = 0; c < sc.cols; c++) {
             drawGroundTile(c, r, sc);
           }
         ctx.fillStyle = "rgba(232,201,88,0.55)";
-        for (let x = Math.floor(cssW * 0.29); x < Math.floor(cssW * 0.72); x += TS * 4) {
+        for (
+          let x = Math.floor(cssW * 0.29);
+          x < Math.floor(cssW * 0.72);
+          x += TS * 4
+        ) {
           ctx.fillRect(x, Math.floor(cssH * 0.7), TS * 1.5, 3);
         }
         ctx.fillStyle = "rgba(30,34,37,0.12)";
-        ctx.fillRect(Math.floor(cssW * 0.25), Math.floor(cssH * 0.31), Math.floor(cssW * 0.5), 3);
+        ctx.fillRect(
+          Math.floor(cssW * 0.25),
+          Math.floor(cssH * 0.31),
+          Math.floor(cssW * 0.5),
+          3,
+        );
         // y-sorted objects + agents
         type Item = { y: number; draw: () => void };
         const items: Item[] = [];
-        for (const b of sc.buildings) items.push({ y: (b.r + b.h) * TS, draw: () => drawBuilding(b) });
-        for (const p of sc.props) items.push({ y: (p.r + 1) * TS, draw: () => drawProp(p) });
-        for (const s of sprites.current.values()) items.push({ y: fieldY(s.y), draw: () => drawChar(s, t) });
+        for (const b of sc.buildings)
+          items.push({ y: (b.r + b.h) * TS, draw: () => drawBuilding(b) });
+        for (const p of sc.props)
+          items.push({ y: (p.r + 1) * TS, draw: () => drawProp(p) });
+        for (const s of sprites.current.values())
+          items.push({ y: fieldY(s.y), draw: () => drawChar(s, t) });
         items.sort((a, b) => a.y - b.y);
         for (const it of items) it.draw();
+        for (const s of sprites.current.values()) {
+          if (s.phrase && t < s.phraseUntil)
+            drawSpeech(fieldX(s.x), fieldY(s.y) - 52, s.phrase);
+        }
       }
       raf = requestAnimationFrame(loop);
     };
@@ -334,10 +578,12 @@ export function PlazaView({
 
     const onClick = (e: MouseEvent) => {
       const r = canvas.getBoundingClientRect();
-      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const mx = e.clientX - r.left,
+        my = e.clientY - r.top;
       let best: { id: string; d: number } | null = null;
       for (const s of sprites.current.values()) {
-        const px = fieldX(s.x), py = fieldY(s.y);
+        const px = fieldX(s.x),
+          py = fieldY(s.y);
         if (mx >= px - 24 && mx <= px + 24 && my >= py - 44 && my <= py + 20) {
           const d = Math.abs(mx - px);
           if (!best || d < best.d) best = { id: s.id, d };
@@ -361,10 +607,20 @@ export function PlazaView({
     <div className="plaza">
       <canvas ref={canvasRef} className="plaza-canvas" />
       <div className="plaza-bar">
-        <span className="pixel" style={{ fontSize: 11 }}>WHITE SQUARE</span>
-        <button className="nes-btn is-primary" style={{ fontSize: 11 }} onClick={onNew}>+ New Character</button>
+        <span className="pixel" style={{ fontSize: 11 }}>
+          WHITE SQUARE
+        </span>
+        <button
+          className="nes-btn is-primary"
+          style={{ fontSize: 11 }}
+          onClick={onNew}
+        >
+          + New Character
+        </button>
       </div>
-      <div className="plaza-hint">Click a character to edit · Kenney CC0 assets</div>
+      <div className="plaza-hint">
+        Click a character to edit · Kenney CC0 assets
+      </div>
     </div>
   );
 }

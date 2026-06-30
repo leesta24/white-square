@@ -1,18 +1,32 @@
-export interface SeedMemory { id: string; content: string; tags?: string[] }
 export interface Snapshot {
   schemaVersion: "0.1";
   id: string;
   name: string;
   sprite?: string;
   avatar?: string;
-  identity: { markdown?: string; systemPrompt?: string; persona?: Record<string, string> };
-  seedMemoryMd?: string;
-  seedMemory?: SeedMemory[];
-  skills: { name: string; description?: string; content?: string; ref?: string }[];
+  identity: {
+    markdown?: string;
+    systemPrompt?: string;
+    persona?: Record<string, string>;
+  };
+  catchphrases?: string[];
+  skills: {
+    name: string;
+    description?: string;
+    content?: string;
+    ref?: string;
+  }[];
   model?: { provider: string; id: string };
+  runtime?: string;
 }
 
-export interface AgentInstance { instanceId: string; snapshotId: string; name: string; sprite?: string; avatar?: string }
+export interface AgentInstance {
+  instanceId: string;
+  snapshotId: string;
+  name: string;
+  sprite?: string;
+  avatar?: string;
+}
 export interface ChatMessage {
   id: string;
   role: "user" | "agent" | "system";
@@ -36,8 +50,23 @@ export interface MemoryFile {
   content: string;
 }
 
-export interface ProviderInfo { id: string; label: string; envVars: string[]; dashboardUrl: string; available: boolean }
-export interface ModelInfo { provider: string; id: string; label: string }
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  envVars: string[];
+  dashboardUrl: string;
+  available: boolean;
+}
+export interface ModelInfo {
+  provider: string;
+  id: string;
+  label: string;
+}
+export interface RuntimeInfo {
+  id: string;
+  label: string;
+  available: boolean;
+}
 export interface SecretStatus {
   provider: string;
   label: string;
@@ -53,8 +82,14 @@ async function j<T>(r: Response): Promise<T> {
 }
 
 export const api = {
-  runtime: () => fetch("/api/runtime").then((r) => j<{ mode: string }>(r)),
-  models: () => fetch("/api/models").then((r) => j<{ providers: ProviderInfo[]; models: ModelInfo[] }>(r)),
+  models: () =>
+    fetch("/api/models").then((r) =>
+      j<{
+        providers: ProviderInfo[];
+        models: ModelInfo[];
+        runtimes: RuntimeInfo[];
+      }>(r),
+    ),
 
   secrets: () => fetch("/api/secrets").then((r) => j<SecretStatus[]>(r)),
   setSecret: (provider: string, key: string) =>
@@ -64,7 +99,9 @@ export const api = {
       body: JSON.stringify({ key }),
     }).then((r) => j<SecretStatus[]>(r)),
   removeSecret: (provider: string) =>
-    fetch(`/api/secrets/${provider}`, { method: "DELETE" }).then((r) => j<SecretStatus[]>(r)),
+    fetch(`/api/secrets/${provider}`, { method: "DELETE" }).then((r) =>
+      j<SecretStatus[]>(r),
+    ),
 
   listSnapshots: () => fetch("/api/snapshots").then((r) => j<Snapshot[]>(r)),
   saveSnapshot: (s: Partial<Snapshot>) =>
@@ -73,10 +110,16 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(s),
     }).then((r) => j<Snapshot>(r)),
-  deleteSnapshot: (id: string) => fetch(`/api/snapshots/${id}`, { method: "DELETE" }).then((r) => j(r)),
+  deleteSnapshot: (id: string) =>
+    fetch(`/api/snapshots/${id}`, { method: "DELETE" }).then((r) => j(r)),
   listMemoryFiles: (snapshotId: string) =>
-    fetch(`/api/snapshots/${snapshotId}/memory-files`).then((r) => j<MemoryFile[]>(r)),
-  saveMemoryFile: (snapshotId: string, file: Pick<MemoryFile, "scope" | "sessionId" | "content">) =>
+    fetch(`/api/snapshots/${snapshotId}/memory-files`).then((r) =>
+      j<MemoryFile[]>(r),
+    ),
+  saveMemoryFile: (
+    snapshotId: string,
+    file: Pick<MemoryFile, "scope" | "sessionId" | "content">,
+  ) =>
     fetch(`/api/snapshots/${snapshotId}/memory-files/${file.scope}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -84,14 +127,16 @@ export const api = {
     }).then((r) => j<MemoryFile>(r)),
 
   listSessions: () => fetch("/api/sessions").then((r) => j<Session[]>(r)),
-  getSession: (id: string) => fetch(`/api/sessions/${id}`).then((r) => j<Session>(r)),
+  getSession: (id: string) =>
+    fetch(`/api/sessions/${id}`).then((r) => j<Session>(r)),
   createSession: (title: string) =>
     fetch("/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
     }).then((r) => j<Session>(r)),
-  deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then((r) => j(r)),
+  deleteSession: (id: string) =>
+    fetch(`/api/sessions/${id}`, { method: "DELETE" }).then((r) => j(r)),
   addAgent: (sessionId: string, snapshotId: string) =>
     fetch(`/api/sessions/${sessionId}/agents`, {
       method: "POST",
@@ -99,5 +144,7 @@ export const api = {
       body: JSON.stringify({ snapshotId }),
     }).then((r) => j<Session>(r)),
   removeAgent: (sessionId: string, instanceId: string) =>
-    fetch(`/api/sessions/${sessionId}/agents/${instanceId}`, { method: "DELETE" }).then((r) => j<Session>(r)),
+    fetch(`/api/sessions/${sessionId}/agents/${instanceId}`, {
+      method: "DELETE",
+    }).then((r) => j<Session>(r)),
 };

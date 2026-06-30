@@ -1,84 +1,183 @@
 # White Square
 
-> 用 **snapshot** 定义 agent（identity / memory / skill），注入运行时即可快速生成可对话的自定义 agent；本地像素风 UI 里把多个 agent 拉进同一个 chat session 群聊。未来可分享自己定义的 agent。
+White Square is a local-first pixel plaza for creating snapshot-defined AI agents and chatting with them in groups.
 
-## 这是什么
+Instead of writing custom agent code for every character, you define an **Agent Snapshot**: identity, model/runtime settings, sprite, catchphrases, skills, and memory behavior. The host runtime can then spawn that snapshot into a runnable agent.
 
-一个**面向"agent 角色"的定义、生成与群聊**的开源项目。核心资产是一份可移植的 **White Square**——声明式描述一个 agent 的人设、初始记忆和技能。把 snapshot 注入运行时（本地进程，或未来的远端 sandbox），就能动态生成一个 agent 实例。
+The project is experimental and currently focused on a local MVP.
 
-跟现有项目的区别（一句话）：
-- **OpenHands** 让 agent 替你写代码 → 我们让你定义并分享 agent 角色。
-- **Letta** 主打记忆工程的开发者基础设施 → 我们主打消费级、可群聊、可分享的体感（像素风 UI + agent group）。
-- **Agentman** 是 DevOps 式 CLI → 我们有完整的本地 UI 和群聊交互。
+<p align="center">
+  <img src="docs/assets/white-square-plaza.png" alt="White Square plaza screenshot">
+</p>
 
-## MVP 范围
+## Features
 
-1. 本地启动的像素动画风格 UI。
-2. 用户编辑 White Square → 生成 agent 实例。
-3. Chat 页面：分 session，每个 session 可 include 不同的 agent 子集，做多 agent 群聊。
-4. Runtime memory 持久化在 host 本地，预定义（seed）与运行时（runtime）记忆分层存储、分层注入。
+- **Snapshot-defined agents**: create a new agent by editing metadata, not by writing a new runtime.
+- **Editable identity**: define the character's background, voice, behavior boundaries, and interaction style in `identity.md`.
+- **Pixel plaza UI**: agents appear as sprites, move around, and speak catchphrases when they get close.
+- **Multi-agent group chat**: add multiple agents to the same session and talk to them together.
+- **Broadcast and mention routing**: send one message to all included agents, or use `@name` to target one agent.
+- **Readable broadcast turns**: agents receive the same prompt in parallel, while the UI keeps replies separated by speaker so group chat does not collapse into noise.
+- **Per-agent memory**: runtime memory is split into `session` and `global` scopes.
+- **Provider-flexible runtime**: the built-in pi runtime supports multiple LLM providers, with echo mode when no key is configured.
 
-明确**不在** MVP：远端 sandbox 部署、web 分享、复杂的多 agent 自动编排。这些留好扩展口子，但不实现。
+## Quick Start
 
-## 快速开始
+Requirements:
+
+- Node.js 22+
+- npm
+
+Install dependencies and start the local host + UI:
 
 ```bash
 npm install
-npm run dev      # 同时起 host(:4319) + ui(:5173)
+npm run dev
 ```
 
-浏览器打开 **http://localhost:5173**。
+Open:
 
-- **没配任何 LLM key** → 自动进 **echo 模式**（回显，验证全流程不需要 key）。
-- **真实对话**：配任意一个 provider 的 key，引擎自动切到 pi。两种配法：
-  - **页面里配**（推荐）：UI 顶部 **Settings** 标签 → 粘贴对应 provider 的 key → 保存，实时生效、重启保留（存 `./.data/secrets.json`，gitignore + 权限 600）。
-  - **环境变量**：`ANTHROPIC_API_KEY=... npm run dev`（见下表）。UI 配的会覆盖环境变量。
+```text
+http://localhost:5173
+```
 
-### 支持的 provider / 模型
+The dev command starts:
 
-给内置 pi 引擎用。设对应环境变量即可（设了哪个就能用哪个）：
+- host API / websocket server on `http://localhost:4319`
+- Vite UI on `http://localhost:5173`
 
-| Provider | 模型 | 环境变量 |
+If no LLM key is configured, White Square runs in **echo mode**, so the UI and group-chat flow can still be tested locally.
+
+## Configure Models
+
+You can configure keys in either place:
+
+- UI: open **Settings**, paste the provider key, and save.
+- Environment variable: start the app with the relevant key in the shell.
+
+UI-saved keys are stored in `./.data/secrets.json`, ignored by git, and override environment variables.
+
+| Provider | Models | Environment variable |
 |---|---|---|
-| **Claude** (Anthropic) | Sonnet 4.6 / Opus 4.8 / Haiku 4.5 | `ANTHROPIC_API_KEY` |
-| **GPT** (OpenAI) | GPT-5.1 / GPT-5 Pro / GPT-4o | `OPENAI_API_KEY` |
-| **GLM** (Z.ai / 智谱) | GLM-5.2 / 5.1 / 4.7 | `ZAI_API_KEY` |
-| **DeepSeek** | V4 Pro / V4 Flash | `DEEPSEEK_API_KEY` |
-| **Vercel AI Gateway** | 上面所有模型（一个 key 路由） | `AI_GATEWAY_API_KEY` |
+| Claude (Anthropic) | Sonnet 4.6 / Opus 4.8 / Haiku 4.5 | `ANTHROPIC_API_KEY` |
+| GPT (OpenAI) | GPT-5.1 / GPT-5 Pro / GPT-4o | `OPENAI_API_KEY` |
+| GLM (Z.ai / 智谱) | GLM-5.2 / 5.1 / 4.7 | `ZAI_API_KEY` |
+| DeepSeek | V4 Pro / V4 Flash | `DEEPSEEK_API_KEY` |
+| Vercel AI Gateway | routes to supported models | `AI_GATEWAY_API_KEY` |
+
+Example:
 
 ```bash
-# 直连某家：
 ANTHROPIC_API_KEY=sk-ant-... npm run dev
-# 或用 Vercel 网关，一个 key 全都能调：
-AI_GATEWAY_API_KEY=... npm run dev
 ```
 
-在 **Agents** 编辑器里给每个 snapshot 选模型（按 provider 分组，未配 key 的会标 ⚠️）。底层都走 [pi-ai](https://github.com/earendil-works/pi) 原生 provider；模型清单见 `packages/core/src/models.ts`。
+## How To Use
 
-数据（snapshots / memory / sessions）落在 `./.data/`，删掉即重置。
+1. Open the **Agents** tab.
+2. Create a new profile or edit an existing Agent Snapshot.
+3. Set the identity, model/runtime, sprite, and catchphrases.
+4. Open the **Chat** tab and create a session.
+5. Add agents from the right sidebar.
+6. Send a normal message to broadcast to all included agents, or use `@name` to target one.
 
-用法：**Agents** 标签建/编辑 snapshot → **Chat** 标签新建会话 → 右侧把 agent 拉进来 → 多个 agent 时用 `@名字` 点名。
+The default local profiles include 卢姥爷, KUN, 马老师, and 嫖老师. They are stylized internet-persona agents for the White Square playground, not real-person replicas.
 
-## 技术选型（已定）
+## Agent Snapshot
 
-- **Agent 运行时**：`AgentRuntime` 可插拔抽象。MVP 默认实现基于 [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi)（复用其 agent loop / 工具调用 / skills / Session 持久化 / context compaction）；**引擎可替换**，未来可换成用户本地的 Claude Code / Codex。
-- **LLM provider**：经由 pi 底层 `pi-ai`，天然多 provider。
-- **换引擎不重写 memory**：host memory 包成 MCP server（`remember`/`recall`），任何支持 MCP 的引擎复用。
-- **运行位置**：本地进程为默认；sandbox（E2B 等）作为同一接口的另一实现，后置。
+An Agent Snapshot is the portable definition of an agent.
 
-## 文档
+Current snapshot fields include:
 
-- [设计文档](docs/design.md) — 产品形态、核心概念、架构决策。
-- [技术方案](docs/tech-design.md) — snapshot schema、注入契约、memory 分层、模块划分。
+- `id`, `name`, `description`: profile identity and display metadata.
+- `identityMd`: the character prompt, written as Markdown.
+- `runtime`, `model`: which runtime and model should run the agent.
+- `sprite`: the plaza character image.
+- `catchphrases`: short lines the agent can say in the plaza.
+- `skills`: optional capability metadata for future tool extensions.
 
-## 素材
+Runtime memory is not embedded as static prompt text. Agents access memory through tools:
 
-像素素材来自 [Kenney](https://kenney.nl)（**CC0**，公共领域）：
-- `Tiny Town` — 小镇地块（草地/房子/树/栅栏）
-- `Tiny Dungeon` — 角色形象
+- `session`: facts, decisions, preferences, and context that matter inside the current chat session.
+- `global`: stable facts and preferences that should carry across future sessions for this character.
 
-License 文件随素材放在 `packages/ui/public/assets/*/License.txt`。
+## Plaza
+
+White Square uses the metaphor of a public square instead of a plain chat window.
+
+The design direction combines two ideas:
+
+- a renaissance-square feeling of shared public space, where characters visibly gather and interact;
+- the internet absurdity of “卢本伟广场”, where stylized meme-personas, livestream language, and group-chat chaos can coexist.
+
+The goal is not just a themed skin. The plaza makes agents feel present: they have a body, a position, a local social context, and lightweight ambient behavior before they ever enter a chat session.
+
+## Group Chat
+
+A chat session can include multiple agents.
+
+Routing rules:
+
+- **Broadcast**: if the user does not mention a specific agent, every included agent receives the same message in the same turn.
+- **Mention**: if the user writes `@name`, only the targeted agent responds.
+- **Shared transcript**: agents can see the group conversation history.
+- **Separate state**: each agent keeps its own conversation state and memory.
+- **Speaker-separated UI**: responses are rendered as distinct bubbles with agent names, so the user can scan who said what.
+
+Broadcast turns are designed to behave like a group room without becoming noisy. The user writes once; the host fans that message out to the included agents from the same transcript state; each agent answers in its own voice and memory scope; the UI keeps those replies visually separated. That makes a multi-agent turn feel like a room responding, not a sequential chain where one agent's output immediately derails the next.
+
+## Architecture
+
+The repository is split into four workspaces:
+
+```text
+packages/core      shared snapshot types, model metadata, prompt helpers
+packages/runtime   pluggable AgentRuntime implementations
+packages/host      local storage, API server, websocket orchestration
+packages/ui        React + Vite pixel plaza and chat UI
+```
+
+The default runtime uses [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi) and `pi-ai` for model providers. The runtime boundary is intentionally explicit so other engines can be added later.
+
+Local data is stored in:
+
+```text
+.data/
+```
+
+Deleting `.data/` resets local snapshots, sessions, memory, and saved secrets.
+
+## Project Status
+
+Current MVP scope:
+
+- local pixel plaza UI
+- editable Agent Snapshots
+- multi-agent chat sessions
+- broadcast and `@mention` routing
+- session/global runtime memory
+- local model-provider settings
+
+Out of scope for the current MVP:
+
+- hosted sandbox execution
+- web publishing / share links
+- complex autonomous multi-agent orchestration
+- remote account system
+
+## Documentation
+
+- [Design document](docs/design.md)
+- [Technical design](docs/tech-design.md)
+
+## Assets
+
+Pixel assets come from [Kenney](https://kenney.nl) under CC0:
+
+- `Tiny Town`: town tiles
+- `Tiny Dungeon`: character sprites
+
+License files are included under `packages/ui/public/assets/*/License.txt`.
 
 ## License
 
-MIT（待定）
+MIT

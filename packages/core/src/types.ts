@@ -1,6 +1,6 @@
 // Engine-agnostic contracts shared across the project.
 
-export type MemoryScope = "seed" | "global" | "session";
+export type MemoryScope = "global" | "session";
 
 /** A single memory item. */
 export interface MemoryItem {
@@ -14,13 +14,6 @@ export interface MemoryItem {
   tags: string[];
   /** Unix ms. */
   createdAt: number;
-}
-
-/** Predefined memory baked into a snapshot (read-only seed). */
-export interface SeedMemory {
-  id: string;
-  content: string;
-  tags?: string[];
 }
 
 export interface SkillRef {
@@ -53,12 +46,12 @@ export interface AgentSnapshot {
     systemPrompt?: string;
     persona?: Record<string, string>;
   };
-  /** Markdown seed memory document baked into this profile. */
-  seedMemoryMd?: string;
-  /** Legacy itemized seed memory. */
-  seedMemory?: SeedMemory[];
+  /** Short plaza barks. One line is one phrase in the profile editor. */
+  catchphrases?: string[];
   skills: SkillRef[];
   model?: ModelRef;
+  /** Agent runtime (harness) id from RUNTIME_CATALOG. Defaults to "pi". */
+  runtime?: string;
   meta?: {
     author?: string;
     createdAt?: string;
@@ -68,18 +61,24 @@ export interface AgentSnapshot {
 
 // ---- Runtime contracts ----
 
-/** One entry of the memory index injected into the system prompt. */
+/**
+ * One entry of the memory index injected into the system prompt.
+ * Deliberately minimal: only what `renderMemoryIndex` actually surfaces to the
+ * agent (scope + a short summary). Host-internal fields like file path are not
+ * exposed here.
+ */
 export interface MemoryIndexEntry {
-  id: string;
   scope: MemoryScope;
-  path?: string;
   summary: string;
-  tags: string[];
 }
 
 /** Host-side memory access. Source of truth lives on the host. */
 export interface MemoryStore {
-  remember(input: { content: string; scope: "global" | "session"; tags?: string[] }): Promise<MemoryItem>;
+  remember(input: {
+    content: string;
+    scope: "global" | "session";
+    tags?: string[];
+  }): Promise<MemoryItem>;
   recall(input: { query?: string; scope?: MemoryScope }): Promise<MemoryItem[]>;
   /** Cheap, token-bounded listing for context injection. */
   index(): Promise<MemoryIndexEntry[]>;
@@ -89,16 +88,39 @@ export interface MemoryStore {
 export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "tool"; name: string; summary: string }
+  /** The agent chose not to respond this turn (group chat). Host drops the turn. */
+  | { type: "skip"; reason?: string }
   | { type: "done" }
   | { type: "error"; message: string };
 
 /** One message in the shared group-chat transcript. */
 export interface GroupMessage {
+  /** Stable id of the source message; used as the per-agent ingest watermark. */
+  id: string;
   /** Display name of the speaker; "用户" for the human. */
   speaker: string;
   /** Agent instance id when spoken by an agent; absent for the human. */
   selfId?: string;
   text: string;
+}
+
+/**
+ * Engine-owned conversation state, persisted by the host per (agent, session).
+ * Lets an agent resume across turns with its full transcript — including its own
+ * tool calls — instead of being rebuilt statelessly each turn. The `state` blob
+ * is opaque to the host; each engine decides its own shape (pi stores its
+ * AgentMessage[]). A future Claude Code / Codex runtime reuses the same seam.
+ */
+export interface ConversationSnapshot {
+  /** Id of the last group message this agent has already ingested. */
+  watermark: string;
+  /** Opaque engine state, e.g. pi's AgentMessage[]. */
+  state: unknown;
+}
+
+export interface ConversationStore {
+  load(): Promise<ConversationSnapshot | undefined>;
+  save(snapshot: ConversationSnapshot): Promise<void>;
 }
 
 /**
@@ -113,6 +135,19 @@ export interface TurnContext {
   selfInstanceId: string;
   selfName: string;
   memory: MemoryStore;
+  /** Cross-turn conversation persistence for this (agent, session). */
+  conversation: ConversationStore;
+  /**
+   * True when this turn was addressed to the agent directly (@mention). When
+   * false (broadcast), the engine may let the agent skip rather than reply.
+   */
+  directed?: boolean;
+  /**
+   * Display names of all characters currently in the session (including self).
+   * Lets a broadcasting agent decide whether someone else is better placed to
+   * answer instead of skipping blind.
+   */
+  cast?: string[];
   model?: { provider: string; id: string };
   transcript: GroupMessage[];
 }
@@ -120,5 +155,8 @@ export interface TurnContext {
 /** Pluggable agent engine. pi-agent-core is the MVP implementation. */
 export interface AgentRuntime {
   readonly mode: string; // e.g. "pi" | "echo"
-  respond(snapshot: AgentSnapshot, turn: TurnContext): AsyncIterable<AgentEvent>;
+  respond(
+    snapshot: AgentSnapshot,
+    turn: TurnContext,
+  ): AsyncIterable<AgentEvent>;
 }

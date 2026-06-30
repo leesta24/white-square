@@ -7,17 +7,18 @@ import type { MemoryIndexEntry } from "./types.ts";
  */
 export function renderMemoryIndex(entries: MemoryIndexEntry[]): string {
   if (entries.length === 0) return "";
-  const lines = entries.map((e) => `- ${labelForScope(e.scope)} — ${e.summary}`);
+  const lines = entries.map(
+    (e) => `- ${labelForScope(e.scope)} — ${e.summary}`,
+  );
   return [
     "## Memory Index",
-    "You have access to seed memory, global memory, and session memory through tools.",
+    "You have access to global memory and session memory through tools.",
     "This is only a short index. Use `recall` when you need the full memory content.",
     ...lines,
   ].join("\n");
 }
 
 function labelForScope(scope: MemoryIndexEntry["scope"]): string {
-  if (scope === "seed") return "seed memory";
   if (scope === "global") return "global memory";
   return "session memory";
 }

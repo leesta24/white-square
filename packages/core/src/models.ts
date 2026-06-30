@@ -52,6 +52,25 @@ export const DEFAULT_MODEL: { provider: string; id: string } = {
   id: process.env.WHITE_SQUARE_MODEL ?? process.env.AGENT_SNAPSHOT_MODEL ?? "claude-sonnet-4-6",
 };
 
+// Agent runtime (harness) catalog. The runtime is a per-agent property, not a
+// global mode. `pi` is our built-in harness; codex / claude-code are planned
+// seams that are not implemented yet (available: false → shown but not pickable).
+// (`echo` is intentionally absent: it's the no-key mock fallback, not a runtime
+// a user chooses.)
+export interface RuntimeEntry {
+  id: string;
+  label: string;
+  available: boolean;
+}
+
+export const RUNTIME_CATALOG: RuntimeEntry[] = [
+  { id: "pi", label: "Pi (built-in)", available: true },
+  { id: "codex", label: "Codex", available: false },
+  { id: "claude-code", label: "Claude Code", available: false },
+];
+
+export const DEFAULT_RUNTIME = "pi";
+
 /** All env var names across providers (used to detect whether pi can run). */
 export function allProviderEnvVars(): string[] {
   return PROVIDER_CATALOG.flatMap((p) => p.envVars);

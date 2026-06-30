@@ -1,6 +1,9 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AgentSnapshot } from "@white-square/core";
+import {
+  type AgentSnapshot,
+  resolveIdentityMarkdown,
+} from "@white-square/core";
 
 export interface AgentInstance {
   instanceId: string;
@@ -67,15 +70,27 @@ export class Storage {
     return Promise.all(snapshots.map((s) => this.withMarkdownDocs(s)));
   }
   async getSnapshot(id: string): Promise<AgentSnapshot | undefined> {
-    const snapshot = await this.readJson<AgentSnapshot>(join(this.snapDir(), `${id}.json`));
+    const snapshot = await this.readJson<AgentSnapshot>(
+      join(this.snapDir(), `${id}.json`),
+    );
     return snapshot ? this.withMarkdownDocs(snapshot) : undefined;
   }
   async saveSnapshot(s: AgentSnapshot): Promise<AgentSnapshot> {
     const normalized = normalizeMarkdownSnapshot(s);
     await mkdir(this.profileDir(normalized.id), { recursive: true });
-    await writeFile(join(this.profileDir(normalized.id), "identity.md"), identityMarkdown(normalized), "utf8");
-    await writeFile(join(this.profileDir(normalized.id), "seed-memory.md"), seedMarkdown(normalized), "utf8");
-    await writeFile(join(this.snapDir(), `${normalized.id}.json`), JSON.stringify(normalized, null, 2), "utf8");
+    await writeFile(
+      join(this.profileDir(normalized.id), "identity.md"),
+      resolveIdentityMarkdown(normalized),
+      "utf8",
+    );
+    await rm(join(this.profileDir(normalized.id), "seed-memory.md"), {
+      force: true,
+    });
+    await writeFile(
+      join(this.snapDir(), `${normalized.id}.json`),
+      JSON.stringify(normalized, null, 2),
+      "utf8",
+    );
     return normalized;
   }
   async deleteSnapshot(id: string): Promise<void> {
@@ -91,7 +106,11 @@ export class Storage {
     return this.readJson<Session>(join(this.sessDir(), `${id}.json`));
   }
   async saveSession(s: Session): Promise<Session> {
-    await writeFile(join(this.sessDir(), `${s.id}.json`), JSON.stringify(s, null, 2), "utf8");
+    await writeFile(
+      join(this.sessDir(), `${s.id}.json`),
+      JSON.stringify(s, null, 2),
+      "utf8",
+    );
     return s;
   }
   async deleteSession(id: string): Promise<void> {
@@ -105,7 +124,7 @@ export class Storage {
       {
         scope: "global",
         path: join(base, "global.md"),
-        content: await this.readText(join(base, "global.md")) ?? "",
+        content: (await this.readText(join(base, "global.md"))) ?? "",
       },
     ];
     for (const session of sessions) {
@@ -116,16 +135,20 @@ export class Storage {
         path,
         sessionId: session.id,
         sessionTitle: session.title,
-        content: await this.readText(path) ?? "",
+        content: (await this.readText(path)) ?? "",
       });
     }
     return files;
   }
 
-  async saveMemoryFile(snapshotId: string, input: { scope: "global" | "session"; content: string; sessionId?: string }): Promise<MemoryFile> {
-    const path = input.scope === "global"
-      ? join(this.memoryDir(snapshotId), "global.md")
-      : join(this.memoryDir(snapshotId), "sessions", `${input.sessionId}.md`);
+  async saveMemoryFile(
+    snapshotId: string,
+    input: { scope: "global" | "session"; content: string; sessionId?: string },
+  ): Promise<MemoryFile> {
+    const path =
+      input.scope === "global"
+        ? join(this.memoryDir(snapshotId), "global.md")
+        : join(this.memoryDir(snapshotId), "sessions", `${input.sessionId}.md`);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, input.content, "utf8");
     return {
@@ -156,16 +179,18 @@ export class Storage {
     }
   }
 
-  private async withMarkdownDocs(snapshot: AgentSnapshot): Promise<AgentSnapshot> {
-    const identity = await this.readText(join(this.profileDir(snapshot.id), "identity.md"));
-    const seed = await this.readText(join(this.profileDir(snapshot.id), "seed-memory.md"));
+  private async withMarkdownDocs(
+    snapshot: AgentSnapshot,
+  ): Promise<AgentSnapshot> {
+    const identity = await this.readText(
+      join(this.profileDir(snapshot.id), "identity.md"),
+    );
     return normalizeMarkdownSnapshot({
       ...snapshot,
       identity: {
         ...snapshot.identity,
-        markdown: identity ?? identityMarkdown(snapshot),
+        markdown: identity ?? resolveIdentityMarkdown(snapshot),
       },
-      seedMemoryMd: seed ?? seedMarkdown(snapshot),
     });
   }
 
@@ -180,25 +205,21 @@ export class Storage {
 }
 
 function normalizeMarkdownSnapshot(s: AgentSnapshot): AgentSnapshot {
-  const identity = identityMarkdown(s);
-  const seed = seedMarkdown(s);
+  const identity = resolveIdentityMarkdown(s);
+  const {
+    seedMemoryMd: _seedMemoryMd,
+    seedMemory: _seedMemory,
+    ...rest
+  } = s as AgentSnapshot & {
+    seedMemoryMd?: unknown;
+    seedMemory?: unknown;
+  };
   return {
-    ...s,
+    ...rest,
     identity: {
       ...s.identity,
       markdown: identity,
       systemPrompt: identity,
     },
-    seedMemoryMd: seed,
-    seedMemory: [{ id: "seed-memory.md", content: seed, tags: ["seed"] }],
   };
-}
-
-function identityMarkdown(s: AgentSnapshot): string {
-  return s.identity.markdown ?? s.identity.systemPrompt ?? "";
-}
-
-function seedMarkdown(s: AgentSnapshot): string {
-  if (s.seedMemoryMd !== undefined) return s.seedMemoryMd;
-  return (s.seedMemory ?? []).map((m) => m.content).join("\n\n");
 }

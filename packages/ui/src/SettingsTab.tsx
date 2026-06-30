@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type SecretStatus } from "./api.ts";
 
-export function SettingsTab({ onChange }: { onChange?: () => void }) {
+export function SettingsTab() {
   const [secrets, setSecrets] = useState<SecretStatus[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
@@ -14,13 +14,11 @@ export function SettingsTab({ onChange }: { onChange?: () => void }) {
     const next = await api.setSecret(provider, key);
     setSecrets(next);
     setDrafts({ ...drafts, [provider]: "" });
-    onChange?.();
   };
   const clear = async (provider: string) => {
     if (!confirm("Remove this provider key?")) return;
     const next = await api.removeSecret(provider);
     setSecrets(next);
-    onChange?.();
   };
 
   return (

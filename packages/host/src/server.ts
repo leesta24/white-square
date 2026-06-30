@@ -3,10 +3,23 @@ import { createServer } from "node:http";
 import cors from "cors";
 import express from "express";
 import { WebSocketServer, type WebSocket } from "ws";
-import { type AgentSnapshot, availableProviders, type GroupMessage, MODEL_CATALOG, PROVIDER_CATALOG } from "@white-square/core";
+import {
+  type AgentSnapshot,
+  availableProviders,
+  DEFAULT_RUNTIME,
+  type GroupMessage,
+  MODEL_CATALOG,
+  PROVIDER_CATALOG,
+  RUNTIME_CATALOG,
+} from "@white-square/core";
 import { AgentManager } from "./agents.ts";
 import type { SecretStore } from "./secrets.ts";
-import type { AgentInstance, ChatMessage, Session, Storage } from "./storage.ts";
+import type {
+  AgentInstance,
+  ChatMessage,
+  Session,
+  Storage,
+} from "./storage.ts";
 import { seedSnapshots } from "./seed.ts";
 
 export interface ServerDeps {
@@ -24,16 +37,15 @@ export async function startServer(deps: ServerDeps, port: number) {
   app.use(cors());
   app.use(express.json({ limit: "1mb" }));
 
-  // Engine mode is dynamic: pi when any provider key is configured, else echo.
-  app.get("/api/runtime", (_req, res) =>
-    res.json({ mode: availableProviders().size > 0 ? "pi" : "echo" }),
-  );
-
   app.get("/api/models", (_req, res) => {
     const available = availableProviders();
     res.json({
-      providers: PROVIDER_CATALOG.map((p) => ({ ...p, available: available.has(p.id) })),
+      providers: PROVIDER_CATALOG.map((p) => ({
+        ...p,
+        available: available.has(p.id),
+      })),
       models: MODEL_CATALOG,
+      runtimes: RUNTIME_CATALOG,
     });
   });
 
@@ -51,7 +63,9 @@ export async function startServer(deps: ServerDeps, port: number) {
   });
 
   // ---- snapshots ----
-  app.get("/api/snapshots", async (_req, res) => res.json(await storage.listSnapshots()));
+  app.get("/api/snapshots", async (_req, res) =>
+    res.json(await storage.listSnapshots()),
+  );
   app.get("/api/snapshots/:id", async (req, res) => {
     const s = await storage.getSnapshot(req.params.id);
     return s ? res.json(s) : res.status(404).json({ error: "not found" });
@@ -77,17 +91,23 @@ export async function startServer(deps: ServerDeps, port: number) {
     const s = await storage.getSnapshot(req.params.id);
     if (!s) return res.status(404).json({ error: "snapshot not found" });
     const scope = req.params.scope;
-    if (scope !== "global" && scope !== "session") return res.status(400).json({ error: "invalid scope" });
-    if (scope === "session" && !req.body?.sessionId) return res.status(400).json({ error: "sessionId required" });
-    res.json(await storage.saveMemoryFile(req.params.id, {
-      scope,
-      sessionId: req.body?.sessionId,
-      content: String(req.body?.content ?? ""),
-    }));
+    if (scope !== "global" && scope !== "session")
+      return res.status(400).json({ error: "invalid scope" });
+    if (scope === "session" && !req.body?.sessionId)
+      return res.status(400).json({ error: "sessionId required" });
+    res.json(
+      await storage.saveMemoryFile(req.params.id, {
+        scope,
+        sessionId: req.body?.sessionId,
+        content: String(req.body?.content ?? ""),
+      }),
+    );
   });
 
   // ---- sessions ----
-  app.get("/api/sessions", async (_req, res) => res.json(await storage.listSessions()));
+  app.get("/api/sessions", async (_req, res) =>
+    res.json(await storage.listSessions()),
+  );
   app.get("/api/sessions/:id", async (req, res) => {
     const s = await storage.getSession(req.params.id);
     return s ? res.json(s) : res.status(404).json({ error: "not found" });
@@ -112,7 +132,9 @@ export async function startServer(deps: ServerDeps, port: number) {
     const snapshot = await storage.getSnapshot(req.body?.snapshotId);
     if (!snapshot) return res.status(400).json({ error: "snapshot not found" });
     if (session.agents.some((a) => a.snapshotId === snapshot.id)) {
-      return res.status(409).json({ error: `${snapshot.name} is already in this session.` });
+      return res
+        .status(409)
+        .json({ error: `${snapshot.name} is already in this session.` });
     }
     const instance: AgentInstance = {
       instanceId: randomUUID(),
@@ -128,36 +150,81 @@ export async function startServer(deps: ServerDeps, port: number) {
   app.delete("/api/sessions/:id/agents/:instanceId", async (req, res) => {
     const session = await storage.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: "session not found" });
-    session.agents = session.agents.filter((a) => a.instanceId !== req.params.instanceId);
+    session.agents = session.agents.filter(
+      (a) => a.instanceId !== req.params.instanceId,
+    );
     await storage.saveSession(session);
     res.json(session);
   });
 
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  const sessionTurnQueues = new Map<string, Promise<void>>();
 
   wss.on("connection", (ws, req) => {
     const url = new URL(req.url ?? "", "http://localhost");
     const sessionId = url.searchParams.get("sessionId") ?? "";
-    ws.on("message", (raw) => handleUserMessage(ws, sessionId, String(raw)).catch((err) => {
-      send(ws, { type: "error", message: err instanceof Error ? err.message : String(err) });
-    }));
+    ws.on("message", (raw) => {
+      void enqueueSessionTurn(sessionId, () =>
+        handleUserMessage(ws, sessionId, String(raw)),
+      )
+        .catch((err) => {
+          send(ws, {
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        })
+        .finally(() => {
+          send(ws, { type: "turn_done" });
+        });
+    });
   });
 
-  async function handleUserMessage(ws: WebSocket, sessionId: string, raw: string) {
+  function enqueueSessionTurn(
+    sessionId: string,
+    task: () => Promise<void>,
+  ): Promise<void> {
+    const prev = (sessionTurnQueues.get(sessionId) ?? Promise.resolve()).catch(
+      () => undefined,
+    );
+    const next = prev.then(task);
+    const stored = next
+      .catch(() => undefined)
+      .finally(() => {
+        if (sessionTurnQueues.get(sessionId) === stored)
+          sessionTurnQueues.delete(sessionId);
+      });
+    sessionTurnQueues.set(sessionId, stored);
+    return next;
+  }
+
+  async function handleUserMessage(
+    ws: WebSocket,
+    sessionId: string,
+    raw: string,
+  ) {
     const data = JSON.parse(raw) as { text?: string };
     const text = (data.text ?? "").trim();
     if (!text) return;
 
     const session = await storage.getSession(sessionId);
-    if (!session) return send(ws, { type: "error", message: "session not found" });
+    if (!session)
+      return send(ws, { type: "error", message: "session not found" });
 
-    const userMsg: ChatMessage = { id: randomUUID(), role: "user", text, ts: Date.now() };
+    const userMsg: ChatMessage = {
+      id: randomUUID(),
+      role: "user",
+      text,
+      ts: Date.now(),
+    };
+    const isFirstUserMsg = !session.messages.some((m) => m.role === "user");
     session.messages.push(userMsg);
+    if (isFirstUserMsg && isDefaultTitle(session.title))
+      session.title = deriveSessionTitle(text);
     await storage.saveSession(session);
-    send(ws, { type: "user_saved", message: userMsg });
+    send(ws, { type: "user_saved", message: userMsg, title: session.title });
 
-    const targets = resolveTargets(session, text);
+    const { targets, directed } = resolveTargets(session, text);
     if (targets.length === 0) {
       const sys: ChatMessage = {
         id: randomUUID(),
@@ -170,65 +237,133 @@ export async function startServer(deps: ServerDeps, port: number) {
       return send(ws, { type: "system", message: sys });
     }
 
-    for (const instance of targets) {
-      const msgId = randomUUID();
-      send(ws, { type: "start", msgId, agentId: instance.instanceId, name: instance.name, avatar: instance.avatar });
-      let full = "";
-      try {
-        // Rebuild the transcript from the latest session state so this agent
-        // sees the human's message AND any earlier agents' replies this round.
-        const fresh = (await storage.getSession(sessionId)) ?? session;
-        const transcript = toTranscript(fresh.messages);
-        for await (const ev of manager.respond(sessionId, instance, transcript)) {
-          if (ev.type === "text") {
-            full += ev.delta;
-            send(ws, { type: "delta", msgId, delta: ev.delta });
-          } else if (ev.type === "tool") {
-            send(ws, { type: "tool", msgId, name: ev.name, summary: ev.summary });
-          } else if (ev.type === "error") {
-            full += `${full ? "\n" : ""}[Error] ${ev.message}`;
-            send(ws, { type: "error", msgId, message: ev.message });
-          }
-        }
-      } catch (err) {
-        const m = err instanceof Error ? err.message : String(err);
-        full += `${full ? "\n" : ""}[Error] ${m}`;
-        send(ws, { type: "error", msgId, message: m });
-      }
-      const agentMsg: ChatMessage = {
-        id: msgId,
-        role: "agent",
-        text: full,
+    const baseTranscript = toTranscript(session.messages);
+    const cast = session.agents.map((a) => a.name);
+    const replies = (
+      await Promise.all(
+        targets.map((instance) =>
+          runAgentTurn(ws, sessionId, instance, baseTranscript, directed, cast),
+        ),
+      )
+    ).filter((m): m is ChatMessage => m !== null);
+
+    const fresh = await storage.getSession(sessionId);
+    if (fresh && replies.length) {
+      fresh.messages.push(...replies);
+      await storage.saveSession(fresh);
+    }
+  }
+
+  /**
+   * Stream one agent's turn. Returns null when the agent stays silent (skip) or
+   * produces nothing — a silent turn leaves zero footprint: no bubble, no
+   * persisted message, no transcript entry. The `start` frame is deferred until
+   * the first real text so a skipping agent never flashes an empty bubble.
+   */
+  async function runAgentTurn(
+    ws: WebSocket,
+    sessionId: string,
+    instance: AgentInstance,
+    transcript: GroupMessage[],
+    directed: boolean,
+    cast: string[],
+  ): Promise<ChatMessage | null> {
+    const msgId = randomUUID();
+    let started = false;
+    let silent = false;
+    let full = "";
+    const pendingTools: { name: string; summary: string }[] = [];
+    const ensureStarted = () => {
+      if (started) return;
+      started = true;
+      send(ws, {
+        type: "start",
+        msgId,
         agentId: instance.instanceId,
         name: instance.name,
-        ts: Date.now(),
-      };
-      const fresh = await storage.getSession(sessionId);
-      if (fresh) {
-        fresh.messages.push(agentMsg);
-        await storage.saveSession(fresh);
+        avatar: instance.avatar,
+      });
+      for (const t of pendingTools)
+        send(ws, { type: "tool", msgId, name: t.name, summary: t.summary });
+      pendingTools.length = 0;
+    };
+    try {
+      for await (const ev of manager.respond(
+        sessionId,
+        instance,
+        transcript,
+        directed,
+        cast,
+      )) {
+        if (ev.type === "text") {
+          ensureStarted();
+          full += ev.delta;
+          send(ws, { type: "delta", msgId, delta: ev.delta });
+        } else if (ev.type === "tool") {
+          if (started)
+            send(ws, { type: "tool", msgId, name: ev.name, summary: ev.summary });
+          else pendingTools.push({ name: ev.name, summary: ev.summary });
+        } else if (ev.type === "skip") {
+          silent = true;
+        } else if (ev.type === "error") {
+          ensureStarted();
+          full += `${full ? "\n" : ""}[Error] ${ev.message}`;
+          send(ws, { type: "error", msgId, message: ev.message });
+        }
       }
-      send(ws, { type: "end", msgId, message: agentMsg });
+    } catch (err) {
+      ensureStarted();
+      const m = err instanceof Error ? err.message : String(err);
+      full += `${full ? "\n" : ""}[Error] ${m}`;
+      send(ws, { type: "error", msgId, message: m });
     }
+    // Silent turn (skip) or empty output → drop it entirely.
+    if (silent || !started) return null;
+    const agentMsg: ChatMessage = {
+      id: msgId,
+      role: "agent",
+      text: full,
+      agentId: instance.instanceId,
+      name: instance.name,
+      ts: Date.now(),
+    };
+    send(ws, { type: "end", msgId, message: agentMsg });
+    return agentMsg;
   }
 
   await new Promise<void>((resolve) => httpServer.listen(port, resolve));
   return httpServer;
 }
 
+/** A session keeps its default title until the human's first message names it. */
+function isDefaultTitle(title: string): boolean {
+  return !title?.trim() || title.trim() === "New Session";
+}
+
+/** Derive a short session title from the first user message. */
+function deriveSessionTitle(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > 24 ? `${oneLine.slice(0, 24)}…` : oneLine;
+}
+
 /**
- * @mention → those agents reply. No (matching) @mention → broadcast to all
- * agents in the session.
+ * @mention → those agents reply (directed: they must answer). No (matching)
+ * @mention → broadcast to all agents (not directed: each may skip).
  */
-function resolveTargets(session: Session, text: string): AgentInstance[] {
+function resolveTargets(
+  session: Session,
+  text: string,
+): { targets: AgentInstance[]; directed: boolean } {
   const tokens = [...text.matchAll(/@(\S+)/g)].map((m) => m[1].toLowerCase());
   if (tokens.length > 0) {
     const matched = session.agents.filter((a) =>
-      tokens.some((t) => a.name.toLowerCase() === t || a.name.toLowerCase().startsWith(t)),
+      tokens.some(
+        (t) => a.name.toLowerCase() === t || a.name.toLowerCase().startsWith(t),
+      ),
     );
-    if (matched.length > 0) return matched;
+    if (matched.length > 0) return { targets: matched, directed: true };
   }
-  return session.agents; // no mention → broadcast to everyone
+  return { targets: session.agents, directed: false }; // broadcast to everyone
 }
 
 /** Map the stored chat log to the engine-facing group transcript (drops UI-only system notices). */
@@ -237,8 +372,13 @@ function toTranscript(messages: ChatMessage[]): GroupMessage[] {
     .filter((m) => m.role === "user" || m.role === "agent")
     .map((m) =>
       m.role === "agent"
-        ? { speaker: m.name ?? "agent", selfId: m.agentId, text: m.text }
-        : { speaker: "User", text: m.text },
+        ? {
+            id: m.id,
+            speaker: m.name ?? "agent",
+            selfId: m.agentId,
+            text: m.text,
+          }
+        : { id: m.id, speaker: "User", text: m.text },
     );
 }
 
@@ -248,9 +388,6 @@ function normalizeSnapshot(body: any): AgentSnapshot {
     body?.identityMd ??
     body?.identity?.systemPrompt ??
     "You are a helpful character in White Square.";
-  const seedMemoryMd =
-    body?.seedMemoryMd ??
-    (Array.isArray(body.seedMemory) ? body.seedMemory.map((m: any) => m?.content ?? "").join("\n\n") : "");
   return {
     schemaVersion: "0.1",
     id: body.id || randomUUID(),
@@ -262,10 +399,12 @@ function normalizeSnapshot(body: any): AgentSnapshot {
       systemPrompt: identityMd,
       persona: body?.identity?.persona,
     },
-    seedMemoryMd,
-    seedMemory: [{ id: "seed-memory.md", content: seedMemoryMd, tags: ["seed"] }],
+    catchphrases: Array.isArray(body.catchphrases)
+      ? body.catchphrases.map((x: unknown) => String(x).trim()).filter(Boolean)
+      : [],
     skills: Array.isArray(body.skills) ? body.skills : [],
     model: body.model,
+    runtime: body.runtime || DEFAULT_RUNTIME,
     meta: body.meta,
   };
 }

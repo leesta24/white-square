@@ -18,12 +18,11 @@
 ## 2. 核心概念
 
 ### 2.1 White Square
-声明式描述一个 agent，是项目最核心的资产。三个维度：
+声明式描述一个 agent，是项目最核心的资产。两个核心维度：
 
 | 维度 | 内容 | 可变性 |
 |---|---|---|
 | **identity** | 人设、背景、说话风格 → 映射 system prompt | 随 snapshot，定义后基本不变 |
-| **seed memory** | 预定义的初始记忆（背景设定、知识） | **只读**，注入后不被 agent 修改 |
 | **skill** | agent 可用的技能/工具引用 | 随 snapshot |
 
 Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未来分享的就是它。
@@ -41,19 +40,18 @@ Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未
 
 | scope | 来源 | 可变 | 作用域 | 注入策略 |
 |---|---|---|---|---|
-| **seed** | snapshot 预定义（出厂自带的 longterm） | 否（只读） | 全局（属于 agent） | index 进 context，细节按需 `recall` |
 | **session** | agent 运行时写入 | 是 | per (agent, session) | 对话自然在 context，超长靠 compaction |
-| **longterm** | agent 运行时写入 | 是 | per agent 全局（跨 session） | index 进 context，细节按需 `recall` |
+| **global** | agent 运行时写入 | 是 | per agent 全局（跨 session） | index 进 context，细节按需 `recall` |
 
 **agent 拿到两个工具，主动权全在它：**
-- `remember({ content, scope, tags })` — agent 决定**存哪**（session / longterm）。
+- `remember({ content, scope, tags })` — agent 决定**存哪**（session / global）。
 - `recall({ query, scope? })` — agent 决定**读哪**，按需取回全量。
 
 > Lest 的明确要求（2026-06-29）：runtime memory 不全量塞进 context；平时只注入 index（`id + 摘要 + tags`），agent 需要细节时自己调 `recall`。
 
 设计要点：
-- **session 学到的默认不污染别的 session**（session scope 隔离）。需要跨 session 永久记住的，agent 主动写进 `longterm`——像人判断「这事记一辈子」还是「聊完算了」。
-- **seed 与 session/longterm 物理分开存储**：seed 在 snapshot 里只读，重置 agent = 丢弃 memory 目录、snapshot 不动。
+- **session 学到的默认不污染别的 session**（session scope 隔离）。需要跨 session 永久记住的，agent 主动写进 `global`——像人判断「这事记一辈子」还是「聊完算了」。
+- **identity 承载出厂人设**；memory 只保存运行时产生的可写内容。
 
 ## 3. 架构总览
 

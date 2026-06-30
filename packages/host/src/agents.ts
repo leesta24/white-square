@@ -1,4 +1,4 @@
-import { FileMemoryStore, type GroupMessage, resolveEngineModel } from "@white-square/core";
+import { FileConversationStore, FileMemoryStore, type GroupMessage, resolveEngineModel } from "@white-square/core";
 import type { AgentEvent, AgentRuntime } from "@white-square/core";
 import type { AgentInstance, Storage } from "./storage.ts";
 
@@ -24,6 +24,8 @@ export class AgentManager {
     sessionId: string,
     instance: AgentInstance,
     transcript: GroupMessage[],
+    directed: boolean,
+    cast: string[],
   ): AsyncIterable<AgentEvent> {
     const snapshot = await this.storage.getSnapshot(instance.snapshotId);
     if (!snapshot) throw new Error(`snapshot not found: ${instance.snapshotId}`);
@@ -33,12 +35,18 @@ export class AgentManager {
     const runtime = resolved.engine === "pi" ? this.pi : this.echo;
 
     const memory = new FileMemoryStore(this.dataDir, snapshot, snapshot.id, sessionId);
+    // Conversation state is keyed by instance, so each agent (even two of the
+    // same snapshot) resumes its own transcript.
+    const conversation = new FileConversationStore(this.dataDir, instance.instanceId, sessionId);
     yield* runtime.respond(snapshot, {
       sessionId,
       agentId: snapshot.id,
       selfInstanceId: instance.instanceId,
       selfName: instance.name,
       memory,
+      conversation,
+      directed,
+      cast,
       model: resolved.model,
       transcript,
     });

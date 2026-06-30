@@ -15,6 +15,8 @@ export const CHAR_ROWS = 11;
 export const CHARACTERS: CharForm[] = [
   { id: "white", label: "White", image: "/assets/characters/white.png" },
   { id: "kun", label: "KUN", image: "/assets/characters/kun.png" },
+  { id: "dashima", label: "大司马", image: "/assets/characters/dashima.png" },
+  { id: "pdd", label: "PDD", image: "/assets/characters/pdd.png" },
   { id: "villager", label: "Villager", tile: 85 },
   { id: "elder", label: "Elder", tile: 87 },
   { id: "wizard", label: "Wizard", tile: 84 },

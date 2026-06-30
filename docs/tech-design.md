@@ -25,7 +25,6 @@ class Session  // append-only 状态树，通过 storage.appendEntry(entry) 持�
 |---|---|
 | snapshot.identity | `AgentState.systemPrompt`（+ system-prompt provider） |
 | snapshot.skills | `Skill[]` 注入 `AgentState.tools` / skills 资源 |
-| snapshot.seedMemory | 拼进 systemPrompt 或作为可检索资源（见 §4） |
 | runtime memory | `Session` + **自定义 storage**（写回 host） |
 | 不全量注入 | pi `compaction` + 我们的 memory index |
 | 多 LLM provider | 底层 `pi-ai` |
@@ -44,9 +43,6 @@ class Session  // append-only 状态树，通过 storage.appendEntry(entry) 持�
     "systemPrompt": "你是……",        // 直接映射 pi systemPrompt
     "persona": { "tone": "……", "background": "……" }  // 结构化，可拼进 prompt
   },
-  "seedMemory": [
-    { "id": "m1", "text": "主人叫 Lest", "tags": ["fact"] }
-  ],
   "skills": [
     { "name": "web_search", "ref": "builtin:web_search" },   // 引用内置/外部 skill
     { "name": "diary", "description": "...", "content": "..." } // 或内联 pi Skill
@@ -108,7 +104,7 @@ interface AgentRuntimeHandle {
 
 以 `PiLocalRuntime` 为例，注入时组装 `AgentState`：
 ```
-systemPrompt = identity.systemPrompt + memoryIndex(seed + longterm)  // index 而非全量
+systemPrompt = identity.systemPrompt + memoryIndex(global + session)  // index 而非全量
 tools        = resolveSkills(snapshot.skills) + [remember, recall]
 model        = host 覆盖值 ?? snapshot.model
 Session       = new Session({ storage: HostMemoryStorage(sessionId, agentId) })
@@ -122,24 +118,23 @@ Session       = new Session({ storage: HostMemoryStorage(sessionId, agentId) })
 ### 4.1 存储布局（host 本地）
 ```
 ~/.white-square/
-  snapshots/<snapshotId>.agent.json     # 出厂态，含 seedMemory（只读）
+  snapshots/<snapshotId>.agent.json     # 出厂态，含 identity / skills / model
   memory/
     <agentId>/
-      longterm.jsonl                     # agent 主动写的跨 session 记忆（append-only）
+      global.jsonl                       # agent 主动写的跨 session 记忆（append-only）
       sessions/<sessionId>.jsonl         # session scope（per agent+session，append-only）
   sessions/<sessionId>.json              # 群聊会话：包含哪些 agent、消息树
 ```
-- **seed**：只读，存在 snapshot 里，不进 memory 目录 → 「重置到出厂」= 丢弃 memory 目录即可。
 - **session**：`sessions/<sessionId>.jsonl`，per (agent, session) 隔离。
-- **longterm**：`longterm.jsonl`，per agent 全局；由 agent 调 `remember({scope:"longterm"})` 主动写入。
+- **global**：`global.jsonl`，per agent 全局；由 agent 调 `remember({scope:"global"})` 主动写入。
 
 ### 4.2 记忆工具（agent 的主动权）
 注入给 agent 两个工具：
 ```ts
-remember({ content: string, scope: "session" | "longterm", tags?: string[] })  // 写
-recall({ query: string, scope?: "session" | "longterm" | "seed" })             // 读，按需取全量
+remember({ content: string, scope: "session" | "global", tags?: string[] })  // 写
+recall({ query: string, scope?: "session" | "global" })                     // 读，按需取全量
 ```
-agent 自己判断：值得长期记 → `scope:"longterm"`；只这次有用 → `scope:"session"`。
+agent 自己判断：值得长期记 → `scope:"global"`；只这次有用 → `scope:"session"`。
 
 ### 4.3 持久化机制
 **source of truth 是 host 的 `MemoryStore`**（读写上面的 jsonl，append-only + write-through）。引擎通过两条路径之一访问它，都不改变存储本身：
@@ -149,7 +144,7 @@ agent 自己判断：值得长期记 → `scope:"longterm"`；只这次有用 �
 无论哪条路径，写入都直达 host 的同一份 jsonl。
 
 ### 4.4 不全量注入（Lest 第 2 点要求）
-seed / longterm memory **不整段塞进 context**。注入时只放：
+runtime memory **不整段塞进 context**。注入时只放：
 - **memory index**：每条 memory 的 `{id, 摘要, tags}` 列表（便宜、token 可控）放进 system prompt。
 - agent 看 index 觉得需要细节 → 调 `recall` 按需取回全量。
 
@@ -199,7 +194,7 @@ white-square/
 - **群聊默认发言**：@点名（只有被点的 agent 回）。
 - **MVP skill**：只做 `recall`。
 
-- **Memory 框架**：scope = seed(只读) / session / longterm；主动权交给 agent，通过 `remember` / `recall` 工具自决存读，无人工固化。
+- **Memory 框架**：scope = session / global；主动权交给 agent，通过 `remember` / `recall` 工具自决存读，无人工固化。
 
 仍待 Lest 拍板：
 - **Q6. 项目名 / License**：仓库名暂用 `white-square`，正式名定了吗？License 用 MIT？

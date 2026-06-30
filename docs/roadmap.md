@@ -19,7 +19,7 @@
 
 ## Stage 1 ✅ — `core`（契约层）
 - Snapshot TS 类型 + JSON 校验。
-- `MemoryStore`：文件实现（seed 只读 / session / longterm），`remember` / `recall`。
+- `MemoryStore`：文件实现（session / global），`remember` / `recall`。
 - `remember` / `recall` 的 pi `AgentTool` 定义。
 - `AgentRuntime` 接口。
 - ✅ checkpoint：`node` 跑一段脚本，能 `remember` 写入、`recall` 读回、memory index 生成。
@@ -27,7 +27,7 @@
 ## Stage 2 ✅ — `runtime`（引擎层）
 - `PiLocalRuntime.spawn(snapshot, ctx)`：组装 `AgentState`（systemPrompt + memory index + tools + model + getApiKey），返回 `prompt()` 流式 handle。
 - `EchoRuntime`：无 key 回退，回显 + 标注 mock 模式。
-- ✅ checkpoint：node smoke——echo 模式必过；有 `ANTHROPIC_API_KEY` 时真实对话 + agent 能调 `remember`/`recall`。
+- ✅ checkpoint：echo 模式可手动验证；有 provider key 时真实对话 + agent 能调 `remember`/`recall`。
 
 ## Stage 3 ✅ — `host`（服务层）
 - HTTP + WebSocket 服务。
@@ -39,16 +39,16 @@
 
 ## Stage 4 ✅ — `ui`（像素风前端）
 - 两个页面：
-  - **Snapshot 编辑器**：列表 / 新建 / 编辑（identity、seed memory、skills、model、像素头像）。
+  - **Snapshot 编辑器**：列表 / 新建 / 编辑（identity、skills、model、像素头像）。
   - **Chat**：session 列表、往 session 里 include agent、@点名群聊、流式气泡。
 - NES.css 像素风 + 简单 sprite 动画。
 - ✅ checkpoint：**localhost 打开，能建/选 snapshot，开 session 拉 agent，@点名对话看到回复**。← Lest 验收点
 
 ## Stage 5 — Memory 打磨 & 收尾 ⏳（需真实 LLM key 验 recall 回路）
-- memory index 注入 system prompt；`recall` 真实回路；longterm 跨 session 验证。
+- memory index 注入 system prompt；`recall` 真实回路；global 跨 session 验证。
 - 重置 agent（丢 memory 目录）。
 - 错误态：无 key 提示、provider 报错提示。
-- ✅ checkpoint：跨 session 让 agent 记住一条 longterm，新 session 里 recall 得到。
+- ✅ checkpoint：跨 session 让 agent 记住一条 global memory，新 session 里 recall 得到。
 
 ---
 
