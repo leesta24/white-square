@@ -7,8 +7,8 @@ import { PlazaView } from "./PlazaView.tsx";
 const EMPTY: Partial<Snapshot> = {
   name: "",
   sprite: DEFAULT_SPRITE,
-  identity: { systemPrompt: "" },
-  seedMemory: [],
+  identity: { markdown: "" },
+  seedMemoryMd: "",
   skills: [],
 };
 
@@ -29,7 +29,7 @@ export function AgentsTab() {
   const providerAvailable = (id: string) => providers.find((p) => p.id === id)?.available ?? false;
 
   const edit = (s: Snapshot) => { setDraft(JSON.parse(JSON.stringify(s))); setEditing(true); };
-  const newOne = () => { setDraft({ ...EMPTY, seedMemory: [], skills: [] }); setEditing(true); };
+  const newOne = () => { setDraft({ ...EMPTY, seedMemoryMd: "", skills: [] }); setEditing(true); };
 
   const save = async () => {
     if (!draft.name?.trim()) return alert("Name this character first.");
@@ -48,16 +48,6 @@ export function AgentsTab() {
     return <PlazaView snapshots={snapshots} onSelect={edit} onNew={newOne} />;
   }
 
-  const setSeed = (i: number, content: string) => {
-    const seed = [...(draft.seedMemory ?? [])];
-    seed[i] = { ...seed[i], content };
-    setDraft({ ...draft, seedMemory: seed });
-  };
-  const addSeed = () =>
-    setDraft({ ...draft, seedMemory: [...(draft.seedMemory ?? []), { id: crypto.randomUUID(), content: "" }] });
-  const delSeed = (i: number) =>
-    setDraft({ ...draft, seedMemory: (draft.seedMemory ?? []).filter((_, k) => k !== i) });
-
   return (
     <>
       <div className="col left">
@@ -72,7 +62,7 @@ export function AgentsTab() {
               <CharSprite sprite={s.sprite} size={28} />
               <div className="meta">
                 <div className="name">{s.name}</div>
-                <div className="sub">{s.identity.systemPrompt.slice(0, 24)}</div>
+                <div className="sub">{(s.identity.markdown ?? s.identity.systemPrompt ?? "").slice(0, 24)}</div>
               </div>
             </div>
           ))}
@@ -106,9 +96,13 @@ export function AgentsTab() {
           ))}
         </div>
 
-        <label className="field">Identity（system prompt）</label>
-        <textarea className="nes-textarea" rows={5} value={draft.identity?.systemPrompt ?? ""}
-          onChange={(e) => setDraft({ ...draft, identity: { ...draft.identity!, systemPrompt: e.target.value } })} />
+        <label className="field">identity.md</label>
+        <textarea
+          className="nes-textarea"
+          rows={10}
+          value={draft.identity?.markdown ?? draft.identity?.systemPrompt ?? ""}
+          onChange={(e) => setDraft({ ...draft, identity: { ...draft.identity!, markdown: e.target.value, systemPrompt: e.target.value } })}
+        />
 
         <label className="field">Model (blank = default Claude Sonnet)</label>
         <div className="nes-select">
@@ -139,14 +133,13 @@ export function AgentsTab() {
           </div>
         )}
 
-        <label className="field">Seed Memory</label>
-        {(draft.seedMemory ?? []).map((m, i) => (
-          <div className="row" key={m.id} style={{ marginBottom: 6 }}>
-            <input className="nes-input" value={m.content} onChange={(e) => setSeed(i, e.target.value)} />
-            <button className="nes-btn is-error" style={{ fontSize: 10 }} onClick={() => delSeed(i)}>×</button>
-          </div>
-        ))}
-        <button className="nes-btn" style={{ fontSize: 10 }} onClick={addSeed}>+ Add Memory</button>
+        <label className="field">seed-memory.md</label>
+        <textarea
+          className="nes-textarea"
+          rows={8}
+          value={draft.seedMemoryMd ?? (draft.seedMemory ?? []).map((m) => m.content).join("\n\n")}
+          onChange={(e) => setDraft({ ...draft, seedMemoryMd: e.target.value })}
+        />
 
         <div className="row" style={{ marginTop: 20 }}>
           <button className="nes-btn is-success" onClick={save}>Save</button>

@@ -5,7 +5,7 @@ import { type Static, Type } from "typebox";
 const rememberSchema = Type.Object({
   content: Type.String({ description: "The fact or note to store." }),
   scope: Type.Union([Type.Literal("session"), Type.Literal("longterm")], {
-    description: "longterm = remember across all future conversations; session = only this conversation.",
+    description: "longterm = append to global.md; session = append to this session's markdown file.",
   }),
   tags: Type.Optional(Type.Array(Type.String(), { description: "Short tags for retrieval." })),
 });
@@ -28,18 +28,18 @@ export function memoryTools(memory: MemoryStore): AgentTool[] {
   const remember: AgentTool<typeof rememberSchema> = {
     name: "remember",
     label: "Remember",
-    description: "Store a memory. Choose scope: longterm (persist across conversations) or session (this conversation only).",
+    description: "Append a note to a markdown memory file. Choose scope: longterm (global.md) or session (this session's md).",
     parameters: rememberSchema,
     execute: async (_id: string, params: Static<typeof rememberSchema>) => {
       const item = await memory.remember(params);
-      return { ...text(`Remembered (${item.scope}) [${item.id}].`), details: item };
+      return { ...text(`Appended to ${item.path ?? item.id}.`), details: item };
     },
   };
 
   const recall: AgentTool<typeof recallSchema> = {
     name: "recall",
     label: "Recall",
-    description: "Read full memory content by query/scope. Use this when the memory index shows something relevant.",
+    description: "Read markdown memory files by query/scope. Use this when you need the full md content.",
     parameters: recallSchema,
     execute: async (_id: string, params: Static<typeof recallSchema>) => {
       const items = await memory.recall(params);

@@ -226,6 +226,14 @@ function toTranscript(messages: ChatMessage[]): GroupMessage[] {
 }
 
 function normalizeSnapshot(body: any): AgentSnapshot {
+  const identityMd =
+    body?.identity?.markdown ??
+    body?.identityMd ??
+    body?.identity?.systemPrompt ??
+    "You are a helpful character in White Square.";
+  const seedMemoryMd =
+    body?.seedMemoryMd ??
+    (Array.isArray(body.seedMemory) ? body.seedMemory.map((m: any) => m?.content ?? "").join("\n\n") : "");
   return {
     schemaVersion: "0.1",
     id: body.id || randomUUID(),
@@ -233,10 +241,12 @@ function normalizeSnapshot(body: any): AgentSnapshot {
     sprite: body.sprite || "white",
     avatar: body.avatar,
     identity: {
-      systemPrompt: body?.identity?.systemPrompt || "You are a helpful character in White Square.",
+      markdown: identityMd,
+      systemPrompt: identityMd,
       persona: body?.identity?.persona,
     },
-    seedMemory: Array.isArray(body.seedMemory) ? body.seedMemory : [],
+    seedMemoryMd,
+    seedMemory: [{ id: "seed-memory.md", content: seedMemoryMd, tags: ["seed"] }],
     skills: Array.isArray(body.skills) ? body.skills : [],
     model: body.model,
     meta: body.meta,

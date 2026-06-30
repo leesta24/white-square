@@ -38,13 +38,13 @@ export class PiLocalRuntime implements AgentRuntime {
 
       const m = turn.model ?? snapshot.model ?? DEFAULT_MODEL;
       const model = getModel(m.provider as any, m.id as any);
-      if (!model) throw new Error(`未知模型: ${m.provider}/${m.id}（不在 pi-ai 目录里）`);
+      if (!model) throw new Error(`Unknown model: ${m.provider}/${m.id}`);
 
       // All but the last transcript message become prior history; the last one
       // is the prompt that triggers this agent's response.
       const prior = turn.transcript.slice(0, -1).map((msg) => toLlmMessage(msg, turn.selfInstanceId));
       const last = turn.transcript[turn.transcript.length - 1];
-      const triggerText = last ? renderForeign(last) : "(继续)";
+      const triggerText = last ? renderForeign(last) : "(continue)";
 
       const agent = new Agent({
         initialState: {
@@ -105,8 +105,11 @@ function toLlmMessage(msg: GroupMessage, selfInstanceId: string) {
 
 function buildSystemPrompt(snapshot: AgentSnapshot, turn: TurnContext, memoryBlock: string): string {
   const groupNote = [
-    `你正在一个群聊房间里，房间里有多个角色。对话中以 [发言人] 开头的是别人（用户或其他 agent）说的话；没有前缀的是你自己（${turn.selfName}）之前的发言。`,
-    `请以 ${turn.selfName} 的身份自然参与对话：可以回应别人、也可以跟其他 agent 互动；不要复述别人的话，不要在自己的回复前加 [${turn.selfName}] 前缀。`,
+    `You are ${turn.selfName} in a White Square group chat.`,
+    "Messages prefixed with [speaker] are from the user or another character. Your own prior assistant messages have no prefix.",
+    `Reply naturally as ${turn.selfName}. Do not prefix your own reply with [${turn.selfName}].`,
+    "Your identity is a markdown document. Treat memory as markdown files, not database rows.",
   ].join("\n");
-  return [snapshot.identity.systemPrompt, groupNote, memoryBlock].filter(Boolean).join("\n\n");
+  const identityMd = snapshot.identity.markdown ?? snapshot.identity.systemPrompt ?? "";
+  return [identityMd, groupNote, memoryBlock].filter(Boolean).join("\n\n");
 }

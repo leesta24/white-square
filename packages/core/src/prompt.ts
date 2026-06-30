@@ -8,12 +8,13 @@ import type { MemoryIndexEntry } from "./types.ts";
 export function renderMemoryIndex(entries: MemoryIndexEntry[]): string {
   if (entries.length === 0) return "";
   const lines = entries.map(
-    (e) => `- [${e.id}] (${e.scope}${e.tags.length ? `, ${e.tags.join(",")}` : ""}) ${e.summary}`,
+    (e) => `- ${e.scope}: ${e.path ?? e.id} — ${e.summary}`,
   );
   return [
-    "## Your memory index",
-    "These are things you know. Use the `recall` tool with an id or query to read the full content.",
+    "## Markdown memory files",
+    "Your identity, seed memory, global memory, and session memory are markdown documents on the host.",
+    "Use `recall` with a scope or filename-like query to read a markdown file.",
+    "Use `remember` to append new notes: scope `longterm` writes global.md, scope `session` writes this session's md.",
     ...lines,
-    "Use `remember` to store new facts: scope `longterm` to keep across all conversations, `session` for just this one.",
   ].join("\n");
 }

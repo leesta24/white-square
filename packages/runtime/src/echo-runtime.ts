@@ -14,8 +14,8 @@ export class EchoRuntime implements AgentRuntime {
 
   async *respond(snapshot: AgentSnapshot, turn: TurnContext): AsyncIterable<AgentEvent> {
     const last = turn.transcript[turn.transcript.length - 1];
-    const heard = last ? `${last.speaker}说「${last.text}」` : "（没听清）";
-    const reply = `（mock·${snapshot.name}）我听到 ${heard}。配置任意 LLM key 后我会真正参与群聊。`;
+    const heard = last ? `${last.speaker} said "${last.text}"` : "(no message)";
+    const reply = `(mock · ${snapshot.name}) I heard ${heard}. Configure an LLM key to make me join the square for real.`;
     for (const ch of chunk(reply, 6)) {
       yield { type: "text", delta: ch };
       await sleep(25);

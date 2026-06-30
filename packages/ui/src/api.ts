@@ -5,8 +5,9 @@ export interface Snapshot {
   name: string;
   sprite?: string;
   avatar?: string;
-  identity: { systemPrompt: string; persona?: Record<string, string> };
-  seedMemory: SeedMemory[];
+  identity: { markdown?: string; systemPrompt?: string; persona?: Record<string, string> };
+  seedMemoryMd?: string;
+  seedMemory?: SeedMemory[];
   skills: { name: string; description?: string; content?: string; ref?: string }[];
   model?: { provider: string; id: string };
 }

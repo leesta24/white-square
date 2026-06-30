@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
@@ -13,28 +12,27 @@ import type {
  * File-backed MemoryStore. Source of truth on the host.
  *
  * Layout (per agent, under dataDir/memory/<agentId>/):
- *   longterm.jsonl              cross-session, agent-written
- *   sessions/<sessionId>.jsonl  per (agent, session)
+ *   global.md                  cross-session, agent-written
+ *   sessions/<sessionId>.md    per (agent, session)
  *
- * Seed memory comes from the snapshot (read-only) and is never written here,
- * so resetting an agent = delete its memory dir; the snapshot is untouched.
+ * Identity and seed memory are markdown docs under dataDir/profiles/<agentId>/.
+ * Runtime memory is markdown too; remember() appends sections, recall() reads.
  */
 export class FileMemoryStore implements MemoryStore {
-  private readonly seed: MemoryItem[];
-  private readonly longtermPath: string;
+  private readonly identityPath: string;
+  private readonly seedPath: string;
+  private readonly globalPath: string;
   private readonly sessionPath: string;
+  private readonly seedContent: string;
 
   constructor(dataDir: string, snapshot: AgentSnapshot, agentId: string, sessionId: string) {
-    this.seed = snapshot.seedMemory.map((m) => ({
-      id: m.id,
-      scope: "seed" as const,
-      content: m.content,
-      tags: m.tags ?? [],
-      createdAt: 0,
-    }));
-    const base = join(dataDir, "memory", agentId);
-    this.longtermPath = join(base, "longterm.jsonl");
-    this.sessionPath = join(base, "sessions", `${sessionId}.jsonl`);
+    const profileBase = join(dataDir, "profiles", agentId);
+    const memoryBase = join(dataDir, "memory", agentId);
+    this.identityPath = join(profileBase, "identity.md");
+    this.seedPath = join(profileBase, "seed-memory.md");
+    this.globalPath = join(memoryBase, "global.md");
+    this.sessionPath = join(memoryBase, "sessions", `${sessionId}.md`);
+    this.seedContent = seedMemoryMarkdown(snapshot);
   }
 
   async remember(input: {
@@ -42,17 +40,21 @@ export class FileMemoryStore implements MemoryStore {
     scope: "session" | "longterm";
     tags?: string[];
   }): Promise<MemoryItem> {
-    const item: MemoryItem = {
-      id: randomUUID(),
+    const path = input.scope === "longterm" ? this.globalPath : this.sessionPath;
+    const title = input.scope === "longterm" ? "Global memory" : "Session memory";
+    const stamp = new Date().toISOString();
+    const tags = input.tags?.length ? `\nTags: ${input.tags.join(", ")}` : "";
+    const entry = `\n\n## ${stamp} - ${title}${tags}\n\n${input.content.trim()}\n`;
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, entry, "utf8");
+    return {
+      id: input.scope === "longterm" ? "global.md" : "session.md",
       scope: input.scope,
+      path,
       content: input.content,
       tags: input.tags ?? [],
       createdAt: Date.now(),
     };
-    const path = input.scope === "longterm" ? this.longtermPath : this.sessionPath;
-    await mkdir(dirname(path), { recursive: true });
-    await appendFile(path, `${JSON.stringify(item)}\n`, "utf8");
-    return item;
   }
 
   async recall(input: { query?: string; scope?: MemoryScope }): Promise<MemoryItem[]> {
@@ -61,43 +63,76 @@ export class FileMemoryStore implements MemoryStore {
     const q = input.query.toLowerCase();
     // MVP retrieval: substring over content + tags. Good enough; swap for
     // embeddings later without changing the interface.
-    return all.filter(
-      (m) => m.content.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)),
-    );
+    return all.filter((m) => m.content.toLowerCase().includes(q) || m.path?.toLowerCase().includes(q));
   }
 
   async index(): Promise<MemoryIndexEntry[]> {
-    // Index excludes raw session chatter; injects seed + longterm so the agent
-    // knows what it knows and can recall() details on demand.
+    // Keep this cheap: inject paths and short summaries, not full markdown.
     const items = await this.loadAll();
-    return items
-      .filter((m) => m.scope !== "session")
-      .map((m) => ({
-        id: m.id,
-        scope: m.scope,
-        summary: m.content.length > 80 ? `${m.content.slice(0, 80)}…` : m.content,
-        tags: m.tags,
-      }));
+    return items.map((m) => ({
+      id: m.id,
+      scope: m.scope,
+      path: m.path,
+      summary: summarizeMarkdown(m.content),
+      tags: m.tags,
+    }));
   }
 
   private async loadAll(scope?: MemoryScope): Promise<MemoryItem[]> {
     const out: MemoryItem[] = [];
-    if (!scope || scope === "seed") out.push(...this.seed);
-    if (!scope || scope === "longterm") out.push(...(await this.readJsonl(this.longtermPath)));
-    if (!scope || scope === "session") out.push(...(await this.readJsonl(this.sessionPath)));
+    if (!scope || scope === "seed") {
+      out.push({
+        id: "seed-memory.md",
+        scope: "seed",
+        path: this.seedPath,
+        content: await this.readMd(this.seedPath, this.seedContent),
+        tags: ["seed"],
+        createdAt: 0,
+      });
+    }
+    if (!scope || scope === "longterm") {
+      out.push({
+        id: "global.md",
+        scope: "longterm",
+        path: this.globalPath,
+        content: await this.readMd(this.globalPath, ""),
+        tags: ["global"],
+        createdAt: 0,
+      });
+    }
+    if (!scope || scope === "session") {
+      out.push({
+        id: "session.md",
+        scope: "session",
+        path: this.sessionPath,
+        content: await this.readMd(this.sessionPath, ""),
+        tags: ["session"],
+        createdAt: 0,
+      });
+    }
     return out;
   }
 
-  private async readJsonl(path: string): Promise<MemoryItem[]> {
+  private async readMd(path: string, fallback: string): Promise<string> {
     try {
-      const raw = await readFile(path, "utf8");
-      return raw
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as MemoryItem);
+      return await readFile(path, "utf8");
     } catch (err: any) {
-      if (err?.code === "ENOENT") return [];
+      if (err?.code === "ENOENT") return fallback;
       throw err;
     }
   }
+}
+
+function seedMemoryMarkdown(snapshot: AgentSnapshot): string {
+  if (snapshot.seedMemoryMd !== undefined) return snapshot.seedMemoryMd;
+  return (snapshot.seedMemory ?? []).map((m) => m.content).join("\n\n");
+}
+
+function summarizeMarkdown(content: string): string {
+  const line = content
+    .split("\n")
+    .map((s) => s.trim())
+    .find((s) => s && !s.startsWith("#"));
+  if (!line) return "(empty)";
+  return line.length > 100 ? `${line.slice(0, 100)}...` : line;
 }

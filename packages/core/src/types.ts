@@ -6,6 +6,8 @@ export type MemoryScope = "seed" | "session" | "longterm";
 export interface MemoryItem {
   id: string;
   scope: MemoryScope;
+  /** Markdown file path on the host, when file-backed. */
+  path?: string;
   /** Full content. Not always injected into context — see memory index. */
   content: string;
   /** Short tags for the index / retrieval. */
@@ -46,10 +48,15 @@ export interface AgentSnapshot {
   /** Legacy emoji avatar (kept for back-compat; UI now uses `sprite`). */
   avatar?: string;
   identity: {
-    systemPrompt: string;
+    /** Markdown identity document. `systemPrompt` is kept for old saved data. */
+    markdown?: string;
+    systemPrompt?: string;
     persona?: Record<string, string>;
   };
-  seedMemory: SeedMemory[];
+  /** Markdown seed memory document baked into this profile. */
+  seedMemoryMd?: string;
+  /** Legacy itemized seed memory. */
+  seedMemory?: SeedMemory[];
   skills: SkillRef[];
   model?: ModelRef;
   meta?: {
@@ -65,6 +72,7 @@ export interface AgentSnapshot {
 export interface MemoryIndexEntry {
   id: string;
   scope: MemoryScope;
+  path?: string;
   summary: string;
   tags: string[];
 }
