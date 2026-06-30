@@ -18,6 +18,7 @@ export function AgentsTab() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([]);
+  const [selectedSessionKey, setSelectedSessionKey] = useState("");
   const [editing, setEditing] = useState(false); // false → show the plaza
 
   const reload = () => api.listSnapshots().then(setSnapshots);
@@ -32,16 +33,24 @@ export function AgentsTab() {
   const edit = (s: Snapshot) => {
     setDraft(JSON.parse(JSON.stringify(s)));
     setEditing(true);
-    api.listMemoryFiles(s.id).then(setMemoryFiles).catch(() => setMemoryFiles([]));
+    api.listMemoryFiles(s.id).then((files) => {
+      setMemoryFiles(files);
+      setSelectedSessionKey(files.find((f) => f.scope === "session")?.sessionId ?? "");
+    }).catch(() => {
+      setMemoryFiles([]);
+      setSelectedSessionKey("");
+    });
   };
-  const newOne = () => { setDraft({ ...EMPTY, seedMemoryMd: "", skills: [] }); setMemoryFiles([]); setEditing(true); };
+  const newOne = () => { setDraft({ ...EMPTY, seedMemoryMd: "", skills: [] }); setMemoryFiles([]); setSelectedSessionKey(""); setEditing(true); };
 
   const save = async () => {
     if (!draft.name?.trim()) return alert("Name this character first.");
     const saved = await api.saveSnapshot(draft);
     await reload();
     setDraft(saved);
-    setMemoryFiles(await api.listMemoryFiles(saved.id));
+    const files = await api.listMemoryFiles(saved.id);
+    setMemoryFiles(files);
+    setSelectedSessionKey(files.find((f) => f.scope === "session")?.sessionId ?? "");
   };
   const remove = async (id: string) => {
     if (!confirm("Delete this profile?")) return;
@@ -59,6 +68,9 @@ export function AgentsTab() {
     const saved = await api.saveMemoryFile(id, memoryFiles[i]);
     setMemoryFiles((files) => files.map((f, k) => (k === i ? { ...f, ...saved } : f)));
   };
+  const globalIndex = memoryFiles.findIndex((f) => f.scope === "global");
+  const sessionFiles = memoryFiles.filter((f) => f.scope === "session");
+  const selectedSessionIndex = memoryFiles.findIndex((f) => f.scope === "session" && f.sessionId === selectedSessionKey);
 
   if (!editing) {
     return <PlazaView snapshots={snapshots} onSelect={edit} onNew={newOne} />;
@@ -159,26 +171,63 @@ export function AgentsTab() {
 
         {draft.id && (
           <>
-            <label className="field">Runtime Memory Files</label>
-            {memoryFiles.map((file, i) => (
-              <div key={`${file.scope}:${file.sessionId ?? "global"}`} style={{ marginBottom: 12 }}>
+            <label className="field">global.md</label>
+            {globalIndex >= 0 ? (
+              <div style={{ marginBottom: 12 }}>
                 <div className="row" style={{ marginBottom: 4 }}>
-                  <span className="muted" style={{ fontFamily: "monospace" }}>
-                    {file.scope === "global" ? "global.md" : `sessions/${file.sessionTitle ?? file.sessionId}.md`}
-                  </span>
+                  <span className="muted" style={{ fontFamily: "monospace" }}>{memoryFiles[globalIndex].path}</span>
                   <span className="spacer" />
-                  <button className="nes-btn" style={{ fontSize: 10 }} onClick={() => saveMemoryFile(i)}>Save File</button>
+                  <button className="nes-btn" style={{ fontSize: 10 }} onClick={() => saveMemoryFile(globalIndex)}>Save global.md</button>
                 </div>
                 <textarea
                   className="nes-textarea"
-                  rows={file.scope === "global" ? 6 : 5}
-                  value={file.content}
-                  placeholder={file.scope === "global" ? "Global memory is empty." : "Session memory is empty."}
-                  onChange={(e) => setMemoryFile(i, e.target.value)}
+                  rows={6}
+                  value={memoryFiles[globalIndex].content}
+                  placeholder="Global memory is empty."
+                  onChange={(e) => setMemoryFile(globalIndex, e.target.value)}
                 />
               </div>
-            ))}
-            {memoryFiles.length === 0 && <div className="muted">No runtime memory files yet.</div>}
+            ) : (
+              <div className="muted">No global memory file yet.</div>
+            )}
+
+            <label className="field">Session Memory</label>
+            {sessionFiles.length > 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+                  <div className="nes-select" style={{ flex: 1 }}>
+                    <select value={selectedSessionKey} onChange={(e) => setSelectedSessionKey(e.target.value)}>
+                      {sessionFiles.map((file) => (
+                        <option key={file.sessionId} value={file.sessionId}>
+                          {file.sessionTitle ?? file.sessionId}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedSessionIndex >= 0 && (
+                    <button className="nes-btn" style={{ fontSize: 10 }} onClick={() => saveMemoryFile(selectedSessionIndex)}>
+                      Save session.md
+                    </button>
+                  )}
+                </div>
+                {selectedSessionIndex >= 0 && (
+                  <>
+                    <div className="muted" style={{ fontFamily: "monospace", marginBottom: 4 }}>
+                      {memoryFiles[selectedSessionIndex].path}
+                    </div>
+                    <textarea
+                      className="nes-textarea"
+                      rows={6}
+                      value={memoryFiles[selectedSessionIndex].content}
+                      placeholder="Session memory is empty."
+                      onChange={(e) => setMemoryFile(selectedSessionIndex, e.target.value)}
+                    />
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="muted">No session memory files yet. Add this character to a chat session first.</div>
+            )}
           </>
         )}
 
