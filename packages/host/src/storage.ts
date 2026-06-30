@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentSnapshot } from "@white-square/core";
 
 export interface AgentInstance {
@@ -27,6 +27,14 @@ export interface Session {
   createdAt: number;
 }
 
+export interface MemoryFile {
+  scope: "global" | "session";
+  path: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  content: string;
+}
+
 /** Flat JSON-file storage under dataDir. */
 export class Storage {
   private readonly dataDir: string;
@@ -42,6 +50,9 @@ export class Storage {
   }
   private sessDir() {
     return join(this.dataDir, "sessions");
+  }
+  private memoryDir(id: string) {
+    return join(this.dataDir, "memory", id);
   }
 
   async init() {
@@ -85,6 +96,44 @@ export class Storage {
   }
   async deleteSession(id: string): Promise<void> {
     await rm(join(this.sessDir(), `${id}.json`), { force: true });
+  }
+
+  async listMemoryFiles(snapshotId: string): Promise<MemoryFile[]> {
+    const base = this.memoryDir(snapshotId);
+    const sessions = await this.listSessions();
+    const files: MemoryFile[] = [
+      {
+        scope: "global",
+        path: join(base, "global.md"),
+        content: await this.readText(join(base, "global.md")) ?? "",
+      },
+    ];
+    for (const session of sessions) {
+      if (!session.agents.some((a) => a.snapshotId === snapshotId)) continue;
+      const path = join(base, "sessions", `${session.id}.md`);
+      files.push({
+        scope: "session",
+        path,
+        sessionId: session.id,
+        sessionTitle: session.title,
+        content: await this.readText(path) ?? "",
+      });
+    }
+    return files;
+  }
+
+  async saveMemoryFile(snapshotId: string, input: { scope: "global" | "session"; content: string; sessionId?: string }): Promise<MemoryFile> {
+    const path = input.scope === "global"
+      ? join(this.memoryDir(snapshotId), "global.md")
+      : join(this.memoryDir(snapshotId), "sessions", `${input.sessionId}.md`);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, input.content, "utf8");
+    return {
+      scope: input.scope,
+      path,
+      sessionId: input.sessionId,
+      content: input.content,
+    };
   }
 
   private async readDir<T>(dir: string): Promise<T[]> {

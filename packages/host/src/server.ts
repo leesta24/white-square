@@ -68,6 +68,23 @@ export async function startServer(deps: ServerDeps, port: number) {
     await storage.deleteSnapshot(req.params.id);
     res.json({ ok: true });
   });
+  app.get("/api/snapshots/:id/memory-files", async (req, res) => {
+    const s = await storage.getSnapshot(req.params.id);
+    if (!s) return res.status(404).json({ error: "snapshot not found" });
+    res.json(await storage.listMemoryFiles(req.params.id));
+  });
+  app.put("/api/snapshots/:id/memory-files/:scope", async (req, res) => {
+    const s = await storage.getSnapshot(req.params.id);
+    if (!s) return res.status(404).json({ error: "snapshot not found" });
+    const scope = req.params.scope;
+    if (scope !== "global" && scope !== "session") return res.status(400).json({ error: "invalid scope" });
+    if (scope === "session" && !req.body?.sessionId) return res.status(400).json({ error: "sessionId required" });
+    res.json(await storage.saveMemoryFile(req.params.id, {
+      scope,
+      sessionId: req.body?.sessionId,
+      content: String(req.body?.content ?? ""),
+    }));
+  });
 
   // ---- sessions ----
   app.get("/api/sessions", async (_req, res) => res.json(await storage.listSessions()));

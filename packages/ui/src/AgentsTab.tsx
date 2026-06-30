@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ModelInfo, type ProviderInfo, type Snapshot } from "./api.ts";
+import { api, type MemoryFile, type ModelInfo, type ProviderInfo, type Snapshot } from "./api.ts";
 import { CharSprite } from "./CharSprite.tsx";
 import { CHARACTERS, DEFAULT_SPRITE } from "./characters.ts";
 import { PlazaView } from "./PlazaView.tsx";
@@ -17,6 +17,7 @@ export function AgentsTab() {
   const [draft, setDraft] = useState<Partial<Snapshot>>(EMPTY);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([]);
   const [editing, setEditing] = useState(false); // false → show the plaza
 
   const reload = () => api.listSnapshots().then(setSnapshots);
@@ -28,20 +29,35 @@ export function AgentsTab() {
   const providerLabel = (id: string) => providers.find((p) => p.id === id)?.label ?? id;
   const providerAvailable = (id: string) => providers.find((p) => p.id === id)?.available ?? false;
 
-  const edit = (s: Snapshot) => { setDraft(JSON.parse(JSON.stringify(s))); setEditing(true); };
-  const newOne = () => { setDraft({ ...EMPTY, seedMemoryMd: "", skills: [] }); setEditing(true); };
+  const edit = (s: Snapshot) => {
+    setDraft(JSON.parse(JSON.stringify(s)));
+    setEditing(true);
+    api.listMemoryFiles(s.id).then(setMemoryFiles).catch(() => setMemoryFiles([]));
+  };
+  const newOne = () => { setDraft({ ...EMPTY, seedMemoryMd: "", skills: [] }); setMemoryFiles([]); setEditing(true); };
 
   const save = async () => {
     if (!draft.name?.trim()) return alert("Name this character first.");
     const saved = await api.saveSnapshot(draft);
     await reload();
     setDraft(saved);
+    setMemoryFiles(await api.listMemoryFiles(saved.id));
   };
   const remove = async (id: string) => {
     if (!confirm("Delete this profile?")) return;
     await api.deleteSnapshot(id);
     await reload();
     setEditing(false);
+  };
+
+  const setMemoryFile = (i: number, content: string) => {
+    setMemoryFiles((files) => files.map((f, k) => (k === i ? { ...f, content } : f)));
+  };
+  const saveMemoryFile = async (i: number) => {
+    const id = draft.id;
+    if (!id) return;
+    const saved = await api.saveMemoryFile(id, memoryFiles[i]);
+    setMemoryFiles((files) => files.map((f, k) => (k === i ? { ...f, ...saved } : f)));
   };
 
   if (!editing) {
@@ -140,6 +156,31 @@ export function AgentsTab() {
           value={draft.seedMemoryMd ?? (draft.seedMemory ?? []).map((m) => m.content).join("\n\n")}
           onChange={(e) => setDraft({ ...draft, seedMemoryMd: e.target.value })}
         />
+
+        {draft.id && (
+          <>
+            <label className="field">Runtime Memory Files</label>
+            {memoryFiles.map((file, i) => (
+              <div key={`${file.scope}:${file.sessionId ?? "global"}`} style={{ marginBottom: 12 }}>
+                <div className="row" style={{ marginBottom: 4 }}>
+                  <span className="muted" style={{ fontFamily: "monospace" }}>
+                    {file.scope === "global" ? "global.md" : `sessions/${file.sessionTitle ?? file.sessionId}.md`}
+                  </span>
+                  <span className="spacer" />
+                  <button className="nes-btn" style={{ fontSize: 10 }} onClick={() => saveMemoryFile(i)}>Save File</button>
+                </div>
+                <textarea
+                  className="nes-textarea"
+                  rows={file.scope === "global" ? 6 : 5}
+                  value={file.content}
+                  placeholder={file.scope === "global" ? "Global memory is empty." : "Session memory is empty."}
+                  onChange={(e) => setMemoryFile(i, e.target.value)}
+                />
+              </div>
+            ))}
+            {memoryFiles.length === 0 && <div className="muted">No runtime memory files yet.</div>}
+          </>
+        )}
 
         <div className="row" style={{ marginTop: 20 }}>
           <button className="nes-btn is-success" onClick={save}>Save</button>

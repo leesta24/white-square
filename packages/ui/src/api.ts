@@ -28,6 +28,13 @@ export interface Session {
   messages: ChatMessage[];
   createdAt: number;
 }
+export interface MemoryFile {
+  scope: "global" | "session";
+  path: string;
+  sessionId?: string;
+  sessionTitle?: string;
+  content: string;
+}
 
 export interface ProviderInfo { id: string; label: string; envVars: string[]; dashboardUrl: string; available: boolean }
 export interface ModelInfo { provider: string; id: string; label: string }
@@ -67,6 +74,14 @@ export const api = {
       body: JSON.stringify(s),
     }).then((r) => j<Snapshot>(r)),
   deleteSnapshot: (id: string) => fetch(`/api/snapshots/${id}`, { method: "DELETE" }).then((r) => j(r)),
+  listMemoryFiles: (snapshotId: string) =>
+    fetch(`/api/snapshots/${snapshotId}/memory-files`).then((r) => j<MemoryFile[]>(r)),
+  saveMemoryFile: (snapshotId: string, file: Pick<MemoryFile, "scope" | "sessionId" | "content">) =>
+    fetch(`/api/snapshots/${snapshotId}/memory-files/${file.scope}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(file),
+    }).then((r) => j<MemoryFile>(r)),
 
   listSessions: () => fetch("/api/sessions").then((r) => j<Session[]>(r)),
   getSession: (id: string) => fetch(`/api/sessions/${id}`).then((r) => j<Session>(r)),
