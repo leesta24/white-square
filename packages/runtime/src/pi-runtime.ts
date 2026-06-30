@@ -215,8 +215,8 @@ function buildSystemPrompt(
         "### Group Chat — Speaking vs. Staying Silent",
         rosterLine,
         "This message was not addressed to anyone by name. Decide whether you specifically are the right one to respond.",
-        "If another character present is clearly a better fit for this message, or you have nothing meaningful to add, call the `skip` tool to stay silent instead of forcing a reply.",
-        "Staying silent is normal and usually better than adding noise. Reply only when you genuinely have something to say.",
+        "If you have nothing meaningful to add, call the `skip` tool to stay silent instead of forcing a reply.",
+        "Reply only when you genuinely have something to say.",
       ]
         .filter(Boolean)
         .join("\n");

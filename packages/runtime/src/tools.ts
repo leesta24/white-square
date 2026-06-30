@@ -43,7 +43,7 @@ export function skipTool(): AgentTool {
     name: "skip",
     label: "Skip",
     description:
-      "Stay silent this turn. Call this when the latest message isn't addressed to you, you have nothing meaningful to add, or a reply would just be noise. Producing no message is normal and often better.",
+      "Stay silent this turn. Call this when you have nothing meaningful to add, or a reply would just be noise.",
     parameters: skipSchema,
     execute: async () => ({ ...text("(staying silent)"), details: null }),
   };
