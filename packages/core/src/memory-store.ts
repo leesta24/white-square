@@ -37,18 +37,18 @@ export class FileMemoryStore implements MemoryStore {
 
   async remember(input: {
     content: string;
-    scope: "session" | "longterm";
+    scope: "global" | "session";
     tags?: string[];
   }): Promise<MemoryItem> {
-    const path = input.scope === "longterm" ? this.globalPath : this.sessionPath;
-    const title = input.scope === "longterm" ? "Global memory" : "Session memory";
+    const path = input.scope === "global" ? this.globalPath : this.sessionPath;
+    const title = input.scope === "global" ? "Global memory" : "Session memory";
     const stamp = new Date().toISOString();
     const tags = input.tags?.length ? `\nTags: ${input.tags.join(", ")}` : "";
     const entry = `\n\n## ${stamp} - ${title}${tags}\n\n${input.content.trim()}\n`;
     await mkdir(dirname(path), { recursive: true });
     await appendFile(path, entry, "utf8");
     return {
-      id: input.scope === "longterm" ? "global.md" : "session.md",
+      id: input.scope === "global" ? "global.md" : "session.md",
       scope: input.scope,
       path,
       content: input.content,
@@ -90,10 +90,10 @@ export class FileMemoryStore implements MemoryStore {
         createdAt: 0,
       });
     }
-    if (!scope || scope === "longterm") {
+    if (!scope || scope === "global") {
       out.push({
         id: "global.md",
-        scope: "longterm",
+        scope: "global",
         path: this.globalPath,
         content: await this.readMd(this.globalPath, ""),
         tags: ["global"],

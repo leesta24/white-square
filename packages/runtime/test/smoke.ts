@@ -18,12 +18,12 @@ const sessionId = "s1";
 const memory = new FileMemoryStore(dataDir, snapshot, snapshot.id, sessionId);
 
 console.log("== Stage 1: MemoryStore ==");
-await memory.remember({ content: "Lest 在做一个 agent snapshot 开源项目", scope: "longterm", tags: ["project"] });
+await memory.remember({ content: "Lest 在做一个 agent snapshot 开源项目", scope: "global", tags: ["project"] });
 const recalled = await memory.recall({ query: "项目" });
 console.log("recall '项目':", recalled.map((m) => `${m.scope}:${m.content}`));
 const idx = await memory.index();
 console.log("index:", idx);
-if (idx.length < 2) throw new Error("index should include seed + longterm");
+if (idx.length < 2) throw new Error("index should include seed + global");
 
 console.log("\n== Stage 2: runtime stream (turn-based group chat) ==");
 const runtime = selectRuntime();

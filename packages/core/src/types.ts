@@ -1,6 +1,6 @@
 // Engine-agnostic contracts shared across the project.
 
-export type MemoryScope = "seed" | "session" | "longterm";
+export type MemoryScope = "seed" | "global" | "session";
 
 /** A single memory item. */
 export interface MemoryItem {
@@ -79,7 +79,7 @@ export interface MemoryIndexEntry {
 
 /** Host-side memory access. Source of truth lives on the host. */
 export interface MemoryStore {
-  remember(input: { content: string; scope: "session" | "longterm"; tags?: string[] }): Promise<MemoryItem>;
+  remember(input: { content: string; scope: "global" | "session"; tags?: string[] }): Promise<MemoryItem>;
   recall(input: { query?: string; scope?: MemoryScope }): Promise<MemoryItem[]>;
   /** Cheap, token-bounded listing for context injection. */
   index(): Promise<MemoryIndexEntry[]>;

@@ -18,6 +18,6 @@ export function renderMemoryIndex(entries: MemoryIndexEntry[]): string {
 
 function labelForScope(scope: MemoryIndexEntry["scope"]): string {
   if (scope === "seed") return "seed memory";
-  if (scope === "longterm") return "global memory";
+  if (scope === "global") return "global memory";
   return "session memory";
 }
