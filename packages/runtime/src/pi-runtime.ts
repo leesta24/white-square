@@ -34,7 +34,7 @@ export class PiLocalRuntime implements AgentRuntime {
 
     try {
       const indexEntries = await turn.memory.index();
-      const systemPrompt = buildSystemPrompt(snapshot, turn, renderMemoryIndex(indexEntries));
+      const systemPrompt = buildSystemPrompt(snapshot, renderMemoryIndex(indexEntries));
 
       const m = turn.model ?? snapshot.model ?? DEFAULT_MODEL;
       const model = getModel(m.provider as any, m.id as any);
@@ -103,7 +103,7 @@ function toLlmMessage(msg: GroupMessage, selfInstanceId: string) {
   return { role: "user", content: renderForeign(msg), timestamp: Date.now() };
 }
 
-function buildSystemPrompt(snapshot: AgentSnapshot, turn: TurnContext, memoryBlock: string): string {
+function buildSystemPrompt(snapshot: AgentSnapshot, memoryBlock: string): string {
   const systemInstructions = [
     "## System Instructions",
     "### Message Labels",
@@ -120,12 +120,6 @@ function buildSystemPrompt(snapshot: AgentSnapshot, turn: TurnContext, memoryBlo
     "Do not store trivial small talk, one-off phrasing, or information the user did not intend you to preserve.",
     "Use recall before relying on memory when the short memory index is not enough.",
   ].join("\n");
-  const runtimeContext = [
-    "## Runtime Context",
-    `Current character: ${turn.selfName}`,
-    "Reply as the current character defined by Identity.",
-    "Do not prefix your reply with your character name.",
-  ].join("\n");
   const identityMd = snapshot.identity.markdown ?? snapshot.identity.systemPrompt ?? "";
-  return [identityMd, systemInstructions, runtimeContext, memoryBlock].filter(Boolean).join("\n\n");
+  return [identityMd, systemInstructions, memoryBlock].filter(Boolean).join("\n\n");
 }
