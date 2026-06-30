@@ -104,12 +104,25 @@ function toLlmMessage(msg: GroupMessage, selfInstanceId: string) {
 }
 
 function buildSystemPrompt(snapshot: AgentSnapshot, turn: TurnContext, memoryBlock: string): string {
-  const groupNote = [
+  const systemInstructions = [
+    "## System Instructions",
     `You are ${turn.selfName} in a White Square group chat.`,
-    "Messages prefixed with [speaker] are from the user or another character. Your own prior assistant messages have no prefix.",
     `Reply naturally as ${turn.selfName}. Do not prefix your own reply with [${turn.selfName}].`,
-    "Your identity is a markdown document. Treat memory as markdown files, not database rows.",
+    "",
+    "### Message Labels",
+    "Incoming messages may be prefixed with a speaker label.",
+    "`[User] ...` is the human user's message.",
+    "`[Name] ...` is another character's message unless `Name` is your own name.",
+    "Your own prior assistant messages are provided without a speaker prefix.",
+    "Use these labels to understand who said what, especially in multi-character conversations.",
+    "",
+    "### Memory Policy",
+    "Memory is exposed through tools, not through host file paths.",
+    "Use session memory for facts, decisions, preferences, and context that only matter inside the current chat session.",
+    "Use global memory for stable facts and preferences that should carry across future sessions for this character.",
+    "Do not store trivial small talk, one-off phrasing, or information the user did not intend you to preserve.",
+    "Use recall before relying on memory when the short memory index is not enough.",
   ].join("\n");
   const identityMd = snapshot.identity.markdown ?? snapshot.identity.systemPrompt ?? "";
-  return [identityMd, groupNote, memoryBlock].filter(Boolean).join("\n\n");
+  return [identityMd, systemInstructions, memoryBlock].filter(Boolean).join("\n\n");
 }

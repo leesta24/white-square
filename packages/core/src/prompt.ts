@@ -7,14 +7,17 @@ import type { MemoryIndexEntry } from "./types.ts";
  */
 export function renderMemoryIndex(entries: MemoryIndexEntry[]): string {
   if (entries.length === 0) return "";
-  const lines = entries.map(
-    (e) => `- ${e.scope}: ${e.path ?? e.id} — ${e.summary}`,
-  );
+  const lines = entries.map((e) => `- ${labelForScope(e.scope)} — ${e.summary}`);
   return [
-    "## Markdown memory files",
-    "Your identity, seed memory, global memory, and session memory are markdown documents on the host.",
-    "Use `recall` with a scope or filename-like query to read a markdown file.",
-    "Use `remember` to append new notes: scope `longterm` writes global.md, scope `session` writes this session's md.",
+    "## Memory Index",
+    "You have access to seed memory, global memory, and session memory through tools.",
+    "This is only a short index. Use `recall` when you need the full memory content.",
     ...lines,
   ].join("\n");
+}
+
+function labelForScope(scope: MemoryIndexEntry["scope"]): string {
+  if (scope === "seed") return "seed memory";
+  if (scope === "longterm") return "global memory";
+  return "session memory";
 }
