@@ -8,13 +8,17 @@ import type {
 } from "./types.ts";
 
 /**
- * File-backed MemoryStore. Source of truth on the host.
+ * Local-file memory provider. `MemoryStore` is the provider contract; this
+ * implementation keeps the source of truth on the host filesystem. Future
+ * providers (sandbox fs, remote storage) implement the same interface.
  *
  * Layout (per agent, under dataDir/memory/<agentId>/):
  *   global.md                  cross-session, agent-written
  *   sessions/<sessionId>.md    per (agent, session)
  *
- * Runtime memory is markdown too; remember() appends sections, recall() reads.
+ * Each scope is one human-editable markdown file; `remember()` appends a
+ * `## <timestamp>` section (with an optional `Tags:` line). Sections are the
+ * logical entries: reads parse them back out so index/recall work per entry.
  */
 export class FileMemoryStore implements MemoryStore {
   private readonly globalPath: string;
@@ -37,14 +41,14 @@ export class FileMemoryStore implements MemoryStore {
     tags?: string[];
   }): Promise<MemoryItem> {
     const path = input.scope === "global" ? this.globalPath : this.sessionPath;
-    const title = input.scope === "global" ? "Global memory" : "Session memory";
     const stamp = new Date().toISOString();
     const tags = input.tags?.length ? `\nTags: ${input.tags.join(", ")}` : "";
-    const entry = `\n\n## ${stamp} - ${title}${tags}\n\n${input.content.trim()}\n`;
+    const entry = `\n\n## ${stamp}${tags}\n\n${input.content.trim()}\n`;
     await mkdir(dirname(path), { recursive: true });
     await appendFile(path, entry, "utf8");
+    const entries = await this.loadScope(input.scope);
     return {
-      id: input.scope === "global" ? "global.md" : "session.md",
+      id: entryId(input.scope, entries.length - 1),
       scope: input.scope,
       path,
       content: input.content,
@@ -60,60 +64,104 @@ export class FileMemoryStore implements MemoryStore {
     const all = await this.loadAll(input.scope);
     if (!input.query) return all;
     const q = input.query.toLowerCase();
-    // MVP retrieval: substring over content + tags. Good enough; swap for
-    // embeddings later without changing the interface.
+    // MVP retrieval: substring over content + tags, per entry. Good enough;
+    // swap for embeddings later without changing the interface.
     return all.filter(
       (m) =>
         m.content.toLowerCase().includes(q) ||
-        m.path?.toLowerCase().includes(q),
+        m.tags.some((t) => t.toLowerCase().includes(q)),
     );
   }
 
   async index(): Promise<MemoryIndexEntry[]> {
-    // Keep this cheap: inject a short summary per scope, not full markdown.
+    // Keep this cheap: one {id, summary, tags} line per entry, never full content.
     const items = await this.loadAll();
     return items.map((m) => ({
+      id: m.id,
       scope: m.scope,
-      summary: summarizeMarkdown(m.content),
+      summary: summarize(m.content),
+      tags: m.tags,
     }));
   }
 
   private async loadAll(scope?: MemoryScope): Promise<MemoryItem[]> {
     const out: MemoryItem[] = [];
-    if (!scope || scope === "global") {
-      out.push({
-        id: "global.md",
-        scope: "global",
-        path: this.globalPath,
-        content: await this.readMd(this.globalPath, ""),
-        tags: ["global"],
-        createdAt: 0,
-      });
-    }
-    if (!scope || scope === "session") {
-      out.push({
-        id: "session.md",
-        scope: "session",
-        path: this.sessionPath,
-        content: await this.readMd(this.sessionPath, ""),
-        tags: ["session"],
-        createdAt: 0,
-      });
-    }
+    if (!scope || scope === "global") out.push(...(await this.loadScope("global")));
+    if (!scope || scope === "session") out.push(...(await this.loadScope("session")));
     return out;
   }
 
-  private async readMd(path: string, fallback: string): Promise<string> {
+  private async loadScope(scope: MemoryScope): Promise<MemoryItem[]> {
+    const path = scope === "global" ? this.globalPath : this.sessionPath;
+    const raw = await this.readMd(path);
+    return parseEntries(raw).map((e, i) => ({
+      id: entryId(scope, i),
+      scope,
+      path,
+      content: e.content,
+      tags: e.tags,
+      createdAt: e.createdAt,
+    }));
+  }
+
+  private async readMd(path: string): Promise<string> {
     try {
       return await readFile(path, "utf8");
     } catch (err: any) {
-      if (err?.code === "ENOENT") return fallback;
+      if (err?.code === "ENOENT") return "";
       throw err;
     }
   }
 }
 
-function summarizeMarkdown(content: string): string {
+function entryId(scope: MemoryScope, index: number): string {
+  return `${scope}-${index + 1}`;
+}
+
+interface ParsedEntry {
+  content: string;
+  tags: string[];
+  createdAt: number;
+}
+
+/**
+ * Parse a memory markdown file into entries, one per `## ` section. Tolerant
+ * of hand-edited files: text before the first heading becomes its own entry,
+ * and the `Tags:` line is optional.
+ */
+function parseEntries(raw: string): ParsedEntry[] {
+  const out: ParsedEntry[] = [];
+  const blocks = raw.split(/^## /m);
+  for (const [i, block] of blocks.entries()) {
+    if (!block.trim()) continue;
+    let header = "";
+    let body = block;
+    if (i > 0) {
+      const nl = block.indexOf("\n");
+      header = (nl === -1 ? block : block.slice(0, nl)).trim();
+      body = nl === -1 ? "" : block.slice(nl + 1);
+    }
+    const tags: string[] = [];
+    const lines = body.split("\n");
+    const firstText = lines.findIndex((l) => l.trim());
+    if (firstText !== -1 && /^tags:/i.test(lines[firstText].trim())) {
+      const listed = lines[firstText].trim().slice("tags:".length);
+      tags.push(...listed.split(",").map((t) => t.trim()).filter(Boolean));
+      lines.splice(firstText, 1);
+    }
+    const content = lines.join("\n").trim();
+    if (!content && !header) continue;
+    const stamp = Date.parse(header.split(" ")[0] ?? "");
+    out.push({
+      content: content || header,
+      tags,
+      createdAt: Number.isNaN(stamp) ? 0 : stamp,
+    });
+  }
+  return out;
+}
+
+function summarize(content: string): string {
   const line = content
     .split("\n")
     .map((s) => s.trim())

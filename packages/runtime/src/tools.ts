@@ -16,7 +16,8 @@ const rememberSchema = Type.Object({
 const recallSchema = Type.Object({
   query: Type.Optional(
     Type.String({
-      description: "Keyword/substring to search memories. Omit to list all.",
+      description:
+        "Keyword/substring matched against memory content and tags. Omit to list all.",
     }),
   ),
   scope: Type.Optional(

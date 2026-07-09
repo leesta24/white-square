@@ -59,4 +59,4 @@
 4. Lest 试用 → 反馈 → 迭代调整。
 
 ## 砍出 MVP 的（明确不做）
-sandbox/E2B、Claude Code/Codex 引擎、memory-mcp（MVP 用 pi 原生 AgentTool）、web 分享、agent 自动编排、权限沙箱。接缝留在 `core` 接口里。
+sandbox/E2B、Claude Code/Codex 引擎（接入时 file-based memory 直接复用：注入 memory index + 自带文件工具读写 memory files，无需协议层）、web 分享、agent 自动编排、权限沙箱。接缝留在 `core` 接口里。

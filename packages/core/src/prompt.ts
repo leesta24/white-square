@@ -7,9 +7,10 @@ import type { MemoryIndexEntry } from "./types.ts";
  */
 export function renderMemoryIndex(entries: MemoryIndexEntry[]): string {
   if (entries.length === 0) return "";
-  const lines = entries.map(
-    (e) => `- ${labelForScope(e.scope)} — ${e.summary}`,
-  );
+  const lines = entries.map((e) => {
+    const tags = e.tags.length ? ` [${e.tags.join(", ")}]` : "";
+    return `- ${e.id} (${labelForScope(e.scope)})${tags} — ${e.summary}`;
+  });
   return [
     "## Memory Index",
     "You have access to global memory and session memory through tools.",

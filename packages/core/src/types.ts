@@ -62,17 +62,23 @@ export interface AgentSnapshot {
 // ---- Runtime contracts ----
 
 /**
- * One entry of the memory index injected into the system prompt.
- * Deliberately minimal: only what `renderMemoryIndex` actually surfaces to the
- * agent (scope + a short summary). Host-internal fields like file path are not
- * exposed here.
+ * One entry of the memory index injected into the system prompt: one line per
+ * memory entry, `{id, summary, tags}` — never full content. Host-internal
+ * fields like file path are not exposed here.
  */
 export interface MemoryIndexEntry {
+  id: string;
   scope: MemoryScope;
   summary: string;
+  tags: string[];
 }
 
-/** Host-side memory access. Source of truth lives on the host. */
+/**
+ * Memory provider contract. Where memory lives is the provider's concern —
+ * the MVP provider is local files on the host (FileMemoryStore); future
+ * providers (sandbox fs, remote storage) implement the same interface.
+ * Source of truth lives in the provider, write-through on every remember.
+ */
 export interface MemoryStore {
   remember(input: {
     content: string;

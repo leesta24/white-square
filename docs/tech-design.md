@@ -87,10 +87,10 @@ interface AgentRuntimeHandle {
 
 **MVP 只实现 `PiLocalRuntime`，但把接缝留干净。** Codex/Claude Code adapter 以后再接。
 
-### 3.2 引擎无关的契约：snapshot + memory MCP
+### 3.2 引擎无关的契约：snapshot + file-based memory
 换引擎时，两样东西不动：
 1. **AgentSnapshot**：identity / seed / skills，纯数据。
-2. **host memory**：host 把 memory 存储**包成一个 MCP server**，暴露 `remember` / `recall`。pi、Claude Code、Codex **都支持 MCP**，任何引擎指向这个 server 即拥有同一套 host 记忆，**无需为每个引擎重写 memory 逻辑**。（pi 也可选用原生 AgentTool，更轻。）
+2. **file-based memory**：md 文件（§4.1）+ prompt 注入的 memory index。pi 由 host 包一层 `remember`/`recall` 原生 AgentTool 读写这些文件（现状）；Claude Code / Codex 本身就有文件工具，注入 memory index 后直接读写同一批 memory files，无需任何额外协议层。
 
 ### 3.3 引擎适配器(adapter)的职责（很薄）
 每个 adapter 只负责把引擎无关的契约翻译成该引擎的原生机制：
@@ -99,7 +99,7 @@ interface AgentRuntimeHandle {
 |---|---|---|---|
 | identity + memory index | `AgentState.systemPrompt` | `CLAUDE.md` / system prompt | `AGENTS.md` |
 | skills | `Skill[]` → tools | skills / tools | tools |
-| memory remember/recall | 原生 AgentTool 或 MCP | MCP server | MCP server |
+| memory 读写 | 原生 AgentTool（remember/recall） | 自带文件工具直接读写 memory files | 自带文件工具直接读写 memory files |
 | 输出流 | pi events → 归一化 `AgentEvent` | CLI 流 → 归一化 | CLI 流 → 归一化 |
 
 以 `PiLocalRuntime` 为例，注入时组装 `AgentState`：
@@ -115,18 +115,19 @@ Session       = new Session({ storage: HostMemoryStorage(sessionId, agentId) })
 **source of truth = host。** Runtime 通过接口读写，**write-through 实时回写**，不等 session 结束。
 **主动权全在 agent**：框架只提供 scope + 工具 + 持久化 + index 注入，agent 自己决定存哪读哪。无人工「固化」步骤。
 
-### 4.1 存储布局（host 本地）
+### 4.1 存储布局（local provider）
 ```
 ~/.white-square/
   snapshots/<snapshotId>.agent.json     # 出厂态，含 identity / skills / model
   memory/
     <agentId>/
-      global.jsonl                       # agent 主动写的跨 session 记忆（append-only）
-      sessions/<sessionId>.jsonl         # session scope（per agent+session，append-only）
+      global.md                          # agent 主动写的跨 session 记忆（append-only）
+      sessions/<sessionId>.md            # session scope（per agent+session，append-only）
   sessions/<sessionId>.json              # 群聊会话：包含哪些 agent、消息树
 ```
-- **session**：`sessions/<sessionId>.jsonl`，per (agent, session) 隔离。
-- **global**：`global.jsonl`，per agent 全局；由 agent 调 `remember({scope:"global"})` 主动写入。
+- **session**：`sessions/<sessionId>.md`，per (agent, session) 隔离。
+- **global**：`global.md`，per agent 全局；由 agent 调 `remember({scope:"global"})` 主动写入。
+- **载体：每个 scope 一个 markdown 文件**（不是一条一条的 jsonl）——人可读、可直接编辑。`remember` 往文件尾追加一个 `## <时间戳>` section（含可选 `Tags:` 行）。文件内的 section 是**逻辑条目**：读取侧按 `##` 解析出逐条 entry（id / tags / 摘要），供 index 与 recall 使用。载体是整文件，粒度是条目。
 
 ### 4.2 记忆工具（agent 的主动权）
 注入给 agent 两个工具：
@@ -136,17 +137,23 @@ recall({ query: string, scope?: "session" | "global" })                     // �
 ```
 agent 自己判断：值得长期记 → `scope:"global"`；只这次有用 → `scope:"session"`。
 
-### 4.3 持久化机制
-**source of truth 是 host 的 `MemoryStore`**（读写上面的 jsonl，append-only + write-through）。引擎通过两条路径之一访问它，都不改变存储本身：
-- **MCP（引擎无关）**：host 把 `MemoryStore` 包成 MCP server，`remember`/`recall` 是 MCP 工具。pi / Claude Code / Codex 通用。sandbox 场景同理（MCP over HTTP），对引擎透明。
-- **pi 原生（可选优化）**：`PiLocalRuntime` 里也可把 `MemoryStore` 接成 pi 的 `Session` storage（`storage.appendEntry`），少一层 MCP。
+### 4.3 持久化机制：MemoryStore = provider 接口
+**`MemoryStore` 接口就是 memory provider 的契约**（`remember` / `recall` / `index`）。存储载体在哪，是 provider 实现的事，上层（工具注入、index 渲染、host 路由）只依赖接口：
 
-无论哪条路径，写入都直达 host 的同一份 jsonl。
+| provider | 载体 | 状态 |
+|---|---|---|
+| `FileMemoryStore`（local provider） | host 本地文件系统的 md 文件（§4.1） | MVP 唯一实现 |
+| sandbox provider | sandbox filesystem 里的 md 文件 | 未来 |
+| 远端 provider | 云端存储 / DB | 未来 |
+
+**source of truth 在 provider**，write-through 实时落盘，不等 session 结束。换 provider 只换 `MemoryStore` 实现，工具定义、index 注入、md 格式都不动。
+
+> **引擎怎么接入**：pi 跑在 host 进程内，由 host 把 MemoryStore 包成原生 AgentTool（现状）。未来接 Claude Code / Codex 时不走额外协议——它们自带文件工具，host 注入 memory index 后让它们**直接读写同一批 memory files** 即可。file-based 本身就是引擎无关的契约。
 
 ### 4.4 不全量注入（Lest 第 2 点要求）
 runtime memory **不整段塞进 context**。注入时只放：
-- **memory index**：每条 memory 的 `{id, 摘要, tags}` 列表（便宜、token 可控）放进 system prompt。
-- agent 看 index 觉得需要细节 → 调 `recall` 按需取回全量。
+- **memory index**：**每条 entry**（md 文件里的每个 section）的 `{id, 摘要, tags}` 列表（便宜、token 可控）放进 system prompt。不是每个 scope 一行。
+- agent 看 index 觉得需要细节 → 调 `recall` 按需取回，`recall` 按 entry 粒度匹配（query 命中 content 或 **tags**），只返回命中的条目，不是整个文件。
 
 session scope 的内容随对话自然在 context 里；配合 pi 自带 `compaction`，context 长了自动压缩历史，进一步控 token。
 
@@ -157,15 +164,14 @@ session scope 的内容随对话自然在 context 里；配合 pi 自带 `compac
 ```
 white-square/
   packages/
-    core/         # snapshot schema、AgentRuntime 接口、MemoryStore、契约类型
-    memory-mcp/   # 把 MemoryStore 包成 MCP server（remember/recall），引擎无关
+    core/         # snapshot schema、AgentRuntime 接口、MemoryStore（provider 契约）、契约类型
     runtime-pi/   # PiLocalRuntime（基于 pi-agent-core）— MVP 唯一引擎实现
     host/         # 本地服务：HTTP/WS API、snapshot/memory/session 存储、群聊路由
     ui/           # 像素风前端（snapshot 编辑器 + 群聊）
   docs/
 ```
 - 未来引擎适配器各自成包：`runtime-claudecode/`、`runtime-codex/`、`runtime-pi` 的 sandbox 变体。**MVP 不做**，但 `core` 的 `AgentRuntime` 接口为它们留好接缝。
-- `memory-mcp` 独立成包，正是为了「换引擎不重写 memory」——任何 MCP 引擎复用它。
+- memory 接入不需要独立的协议包：未来引擎（Claude Code / Codex）用自带文件工具直接读写 memory files（见 §4.3）。
 - group chat 编排逻辑放 `host`：MVP 只做 @点名路由（解析 `@name` → 路由给对应 agent handle）。
 
 ## 6. 技术栈（已定）
@@ -178,7 +184,7 @@ white-square/
 - **LLM provider**（给内置 pi 引擎用）：复用 pi-ai 原生 provider，集中清单在 `packages/core/src/models.ts`（`PROVIDER_CATALOG` + `MODEL_CATALOG`，参考 guace 的实现）。支持 **Claude / GPT / GLM(zai) / DeepSeek**，以及 **Vercel AI Gateway**（一个 `AI_GATEWAY_API_KEY` 路由所有模型）。key 按 provider 从 env 读，`getModel(provider, id)` 解析；snapshot 的 `model:{provider,id}` 指定，host `GET /api/models` 暴露清单+可用性，UI 分组选择。
 
 ## 7. 里程碑（粗）
-1. **M1 schema + core**：定 snapshot schema、`AgentRuntime`/`MemoryStore` 接口、`memory-mcp`。
+1. **M1 schema + core**：定 snapshot schema、`AgentRuntime`/`MemoryStore` 接口。
 2. **M2 单 agent 跑通**：`PiLocalRuntime` + 一个 snapshot → CLI 能对话、memory 落盘。
 3. **M3 群聊**：host + 多 agent + @点名 + 分 session。
 4. **M4 像素 UI**：snapshot 编辑器 + chat。

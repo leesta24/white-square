@@ -52,6 +52,7 @@ Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未
 设计要点：
 - **session 学到的默认不污染别的 session**（session scope 隔离）。需要跨 session 永久记住的，agent 主动写进 `global`——像人判断「这事记一辈子」还是「聊完算了」。
 - **identity 承载出厂人设**；memory 只保存运行时产生的可写内容。
+- **memory provider 可插拔**：`MemoryStore` 接口是 provider 契约，「memory 存在哪」是实现细节。MVP 是 local file provider（host 本地 md 文件，每个 scope 一个文件，文件内按 section 分条目）；未来可换 sandbox filesystem、远端存储等 provider，上层工具与注入逻辑不动。
 
 ## 3. 架构总览
 
@@ -64,11 +65,11 @@ Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未
 ┌───────────────▼─────────────────────────────┐
 │  Host 服务 (本地)                              │
 │  · Snapshot 存储   · Memory 存储 (source of    │
-│  · Session 管理      truth) ──→ Memory MCP     │
-│  · AgentRuntime 抽象 ───────┐    server        │
-└─────────────────────────────┼────────┬────────┘
-                  注入 snapshot │   MCP: │ remember/recall
-                  ┌─────────────▼────────▼────────┐
+│  · Session 管理      truth, md files)          │
+│  · AgentRuntime 抽象 ───────┐                  │
+└─────────────────────────────┼─────────────────┘
+        注入 snapshot + memory index │ memory files 读写
+                  ┌─────────────▼─────────────────┐
                   │  AgentRuntime（可插拔引擎）      │
                   ├───────────────────────────────┤
                   │ PiLocalRuntime (MVP, pi)       │
@@ -77,7 +78,7 @@ Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未
                   │ CodexRuntime      (未来, 本地)   │
                   └───────────────────────────────┘
 ```
-两根轴都可插拔：**用哪个引擎**（pi / Claude Code / Codex）× **跑在哪**（本地 / sandbox）。snapshot 与 host memory（经 MCP）是引擎无关的契约，换引擎不动。
+两根轴都可插拔：**用哪个引擎**（pi / Claude Code / Codex）× **跑在哪**（本地 / sandbox）。snapshot 与 file-based memory 是引擎无关的契约，换引擎不动。
 
 ### 关键决策
 
@@ -87,7 +88,7 @@ Snapshot 是**可序列化的单文件**（参考 Letta `.af` 的思路），未
 
 **D3. `AgentRuntime` 是可插拔接口，引擎可替换。** 不止「跑在哪」可换（本地/sandbox），「用哪个 agent 引擎」也可换：pi-agent-core 是 MVP 默认实现，用户未来可换成本地的 Claude Code / Codex。host 上层只依赖 `AgentRuntime` 接口，不感知具体引擎与位置。**MVP 只实现 `PiLocalRuntime`，但接缝留干净。**（Lest 2026-06-29 确认）
 
-**D4. 换引擎不重写 memory：host memory 包成 MCP server。** pi / Claude Code / Codex 都支持 MCP，任何引擎指向 host 的 memory MCP（`remember`/`recall`）即复用同一套记忆。引擎适配器只做薄翻译：identity+index → 该引擎的 prompt 机制，skills → 该引擎的 tools，输出流 → 归一化 `AgentEvent`。
+**D4. 换引擎不重写 memory：memory 始终是 file-based。** 记忆的引擎无关契约就是「md 文件 + prompt 里的 memory index」：pi 引擎由 host 注入 `remember`/`recall` 工具读写这些文件（MVP 现状）；未来接 Claude Code / Codex 时同样注入 memory index，它们用自带的文件工具直接读写同一批 memory files 即可，**不需要 MCP 之类的额外协议层**。引擎适配器只做薄翻译：identity+index → 该引擎的 prompt 机制，skills → 该引擎的 tools，输出流 → 归一化 `AgentEvent`。
 
 **D5. 复用 pi-agent-core 而非自研 agent loop。** 作为 MVP 引擎，它的 Session 抽象（append-only + 可插拔 repo）承载 memory 持久化；skills 承载 skill；system-prompt 承载 identity；compaction 承载「不全量注入」。
 
